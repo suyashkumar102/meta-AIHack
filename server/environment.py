@@ -20,6 +20,19 @@ from server.tasks import get_task_definition, load_dataset
 QUEUE_SIZE_RANGE = (3, 5)
 
 
+def _coerce_optional_int(value: Any, field_name: str) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer")
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+
+
 class HelpdeskTicketRoutingEnvironment(
     Environment[HelpdeskTicketAction, HelpdeskTicketObservation, HelpdeskTicketState]
 ):
@@ -40,11 +53,13 @@ class HelpdeskTicketRoutingEnvironment(
         episode_id: Optional[str] = None,
         **kwargs: Any,
     ) -> HelpdeskTicketObservation:
-        task_id: int = kwargs.get("task_id", 1)
+        normalized_seed = _coerce_optional_int(seed, "seed")
+        task_id_value = _coerce_optional_int(kwargs.get("task_id", 1), "task_id")
+        task_id = 1 if task_id_value is None else task_id_value
         task = get_task_definition(task_id)
 
-        if seed is not None:
-            self._rng.seed(seed)
+        if normalized_seed is not None:
+            self._rng.seed(normalized_seed)
 
         queue_size = self._rng.randint(*QUEUE_SIZE_RANGE)
         self._queue = self._rng.sample(self._dataset, min(queue_size, len(self._dataset)))
@@ -53,7 +68,7 @@ class HelpdeskTicketRoutingEnvironment(
             episode_id=episode_id or str(uuid.uuid4()),
             step_count=0,
             current_task_id=task_id,
-            seed=seed,
+            seed=normalized_seed,
             queue_ticket_ids=[t.ticket_id for t in self._queue],
             current_ticket_index=0,
             per_ticket_scores=[],

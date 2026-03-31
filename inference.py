@@ -163,6 +163,75 @@ KEYWORD_ISSUE_TYPES = {
     "export": "feature_request",
 }
 
+
+CRITICAL_PRIORITY_KEYWORDS = (
+    "urgent",
+    "critical",
+    "blocking",
+    "asap",
+    "immediately",
+    "locked out",
+    "outage",
+)
+
+HIGH_PRIORITY_KEYWORDS = (
+    "important",
+    "high priority",
+    "revenue",
+    "today",
+    "eod",
+)
+
+LOW_PRIORITY_KEYWORDS = ("low", "whenever", "no rush")
+
+ESCALATE_KEYWORDS = (
+    "refund",
+    "charged twice",
+    "still haven't",
+    "following up",
+    "needs immediate resolution",
+    "locked out",
+    "suspended",
+    "legal",
+)
+
+FULFILL_KEYWORDS = (
+    "please provide",
+    "confirmation",
+    "data processing addendum",
+    "guidance",
+    "fix",
+    "reproducible",
+    "outage",
+    "policy",
+    "mfa enabled",
+)
+
+
+def heuristic_priority(text: str) -> str:
+    if any(word in text for word in CRITICAL_PRIORITY_KEYWORDS):
+        return "critical"
+    if any(word in text for word in HIGH_PRIORITY_KEYWORDS):
+        return "high"
+    if any(word in text for word in LOW_PRIORITY_KEYWORDS):
+        return "low"
+    return "medium"
+
+
+def heuristic_resolution_action(text: str, issue_type: str) -> str:
+    if issue_type == "spam_phishing":
+        return "ignore"
+    if issue_type == "service_request":
+        return "assign"
+    if issue_type in {"general_inquiry", "feature_request"}:
+        return "acknowledge"
+    if any(keyword in text for keyword in ESCALATE_KEYWORDS):
+        return "escalate"
+    if any(keyword in text for keyword in FULFILL_KEYWORDS):
+        return "fulfill"
+    return ISSUE_TYPE_TO_RESOLUTION_ACTION.get(issue_type, "acknowledge")
+
+
 def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
     text = (ticket.get("title", "") + " " + ticket.get("description", "")).lower()
 
@@ -172,13 +241,8 @@ def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
             issue_type = mapped_issue_type
             break
 
-    priority = "medium"
-    if any(w in text for w in ["urgent", "critical", "blocking", "asap", "immediately"]):
-        priority = "critical"
-    elif any(w in text for w in ["important", "high priority", "revenue"]):
-        priority = "high"
-    elif any(w in text for w in ["low", "whenever", "no rush"]):
-        priority = "low"
+    priority = heuristic_priority(text)
+    resolution_action = heuristic_resolution_action(text, issue_type)
 
     result: dict = {}
     if "issue_type" in allowed_fields:
@@ -190,10 +254,24 @@ def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
             issue_type, "service_desk"
         )
     if "resolution_action" in allowed_fields:
-        result["resolution_action"] = ISSUE_TYPE_TO_RESOLUTION_ACTION.get(
-            issue_type, "acknowledge"
-        )
+        result["resolution_action"] = resolution_action
     return result
+
+
+def build_action(
+    ticket: dict, allowed_fields: list[str], instructions: str
+) -> HelpdeskTicketAction:
+    heuristic_dict = heuristic_action(ticket, allowed_fields)
+
+    if llm_client is None:
+        return HelpdeskTicketAction(**heuristic_dict)
+
+    llm_dict = call_llm(ticket, allowed_fields, instructions)
+    try:
+        return HelpdeskTicketAction(**llm_dict)
+    except Exception as exc:
+        print(f"  Falling back to heuristic action due to invalid LLM output: {exc}")
+        return HelpdeskTicketAction(**heuristic_dict)
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +291,7 @@ def run():
     print(f"Available tasks: {[t['name'] for t in available_tasks.values()]}")
     http.close()
 
-    all_scores: dict[int, list[float]] = {}
+    all_results: dict[int, dict[str, float | int]] = {}
 
     for task_id in TASKS:
         if task_id not in available_tasks:
@@ -229,7 +307,7 @@ def run():
             result = sync_client.reset(seed=SEED, task_id=task_id)
             obs = result.observation
 
-            task_scores: list[float] = []
+            task_step_rewards: list[float] = []
             step_num = 0
 
             while not result.done:
@@ -240,12 +318,7 @@ def run():
                 allowed = obs.allowed_fields
                 instructions = obs.instructions
 
-                if llm_client is not None:
-                    action_dict = call_llm(ticket, allowed, instructions)
-                else:
-                    action_dict = heuristic_action(ticket, allowed)
-
-                action = HelpdeskTicketAction(**action_dict)
+                action = build_action(ticket, allowed, instructions)
                 result = sync_client.step(action)
                 obs = result.observation
 
@@ -253,21 +326,24 @@ def run():
                 print(f"  Step {step_num}: reward={result.reward} done={result.done}")
 
                 if result.reward is not None:
-                    task_scores.append(result.reward)
+                    task_step_rewards.append(float(result.reward))
 
-        all_scores[task_id] = task_scores
-        final = task_scores[-1] if task_scores else 0.0
-        print(f"  Task {task_id} final reward: {final:.4f}")
+        final_reward = task_step_rewards[-1] if task_step_rewards else 0.0
+        all_results[task_id] = {
+            "final_reward": final_reward,
+            "step_count": step_num,
+        }
+        print(f"  Task {task_id} final reward: {final_reward:.4f}")
 
     # Summary
     print("\n=== RESULTS ===")
-    overall = []
+    overall: list[float] = []
     for tid in TASKS:
-        if tid in all_scores:
-            scores = all_scores[tid]
-            avg = sum(scores) / len(scores) if scores else 0.0
-            overall.append(avg)
-            print(f"Task {tid}: avg_score={avg:.4f} ({len(scores)} steps)")
+        if tid in all_results:
+            final_reward = float(all_results[tid]["final_reward"])
+            step_count = int(all_results[tid]["step_count"])
+            overall.append(final_reward)
+            print(f"Task {tid}: final_reward={final_reward:.4f} ({step_count} steps)")
     if overall:
         print(f"Overall: {sum(overall) / len(overall):.4f}")
 
