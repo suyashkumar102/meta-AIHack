@@ -49,7 +49,8 @@ assert tuple(TASKS.keys()) == TASK_IDS
 
 def load_dataset() -> list[HelpdeskTicketRecord]:
     dataset_path = Path(__file__).resolve().parent.parent / "data" / "dataset.json"
-    with dataset_path.open("r", encoding="utf-8") as f:
+    # Accept UTF-8 files saved with a BOM, which is common on Windows editors.
+    with dataset_path.open("r", encoding="utf-8-sig") as f:
         raw = json.load(f)
     return [HelpdeskTicketRecord.model_validate(r) for r in raw]
 
