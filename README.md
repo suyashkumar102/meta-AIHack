@@ -272,6 +272,33 @@ Optional target:
 - `ENV_URL`
 - default value: `http://localhost:8000`
 
+## Runtime Validation Snapshot
+
+The first local heuristic validation pass has already been completed on the current repo shape.
+
+Validated locally:
+
+- server startup
+- `/health`
+- `/tasks`
+- `/reset`
+- heuristic `inference.py` run across all 3 tasks
+
+Current local heuristic results:
+
+| Task | Result |
+|------|--------|
+| Issue Type Classification | `1.0000` |
+| Issue Type And Priority | `0.8800` |
+| Full Ticket Routing | `0.9400` |
+| Overall | `0.9400` |
+
+These numbers are useful as a working baseline, but the team should still rerun them on the latest fully merged branch before treating them as final benchmark values.
+
+### Windows note
+
+During the first runtime pass, the repo surfaced a Windows-specific JSON issue where `data/dataset.json` could include a UTF-8 BOM. The dataset loader in `server/tasks.py` now reads the file with `utf-8-sig`, so the environment resets cleanly even when the file was saved by a Windows editor.
+
 ## Docker
 
 Build:
@@ -315,7 +342,6 @@ The repo is already aligned on:
 
 Still pending before final submission:
 
-- a full local runtime pass
-- a heuristic inference run with recorded numbers
+- a rerun on the latest fully merged branch
 - a Docker smoke test from a clean machine
-- final benchmark values in the docs after validation
+- final benchmark values only after merged-state validation

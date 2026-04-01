@@ -127,11 +127,28 @@ Shared checkpoint outcome so far:
 - the first bug triage item was identified and fixed
 - a rerun on the latest fully merged branch is still recommended before treating benchmark numbers as final
 
+## April 4, 2026
+
+Status: Roopal work complete, shared rerun still pending
+
+Roopal-side work completed:
+
+- updated `README.md` to reflect the first local runtime pass
+- recorded the current heuristic baseline in repo docs as a working, non-final benchmark
+- updated `KNOWLEDGE.md` to distinguish consistency validation from runtime validation
+- updated `MENTAL_MODEL.md` with runtime-validated notes and the Windows BOM handling detail
+
+Documentation fixes made from runtime feedback:
+
+- removed stale wording that implied no local runtime pass had happened yet
+- clarified that merged-state reruns still matter before final benchmark recording
+- documented the Windows UTF-8 BOM issue and its handling path in `server/tasks.py`
+
 ## Open Items
 
 Still pending after the current checkpoint:
 
 - rerun runtime validation on the latest shared branch after all pending merges land
 - perform a Docker smoke test from the merged repo state
-- do the April 4 issue-fix pass from any runtime feedback
+- complete the shared April 4 rerun after Suyash-side fixes land
 - record final benchmark numbers only after the merged-state rerun

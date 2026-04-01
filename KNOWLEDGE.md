@@ -246,11 +246,15 @@ It supports:
 - `openenv.yaml`: environment metadata
 - `server/Dockerfile`: container entry point
 
-## April 2 Validation Notes
+## Validation Notes
 
-This checkpoint is mainly about consistency.
+The repo has now gone through two useful validation phases.
 
-What should agree after April 2:
+### April 2 consistency pass
+
+This was the documentation and packaging alignment pass.
+
+What needed to agree:
 
 - docs say ticket routing, not email processing
 - docs use the same vocabulary as the code
@@ -258,17 +262,31 @@ What should agree after April 2:
 - Docker startup matches the documented server entry point
 - local setup instructions match the current repo layout
 
+### April 3 and April 4 runtime-feedback pass
+
+The first local runtime pass was then completed and surfaced a practical issue:
+
+- `data/dataset.json` was saved with a UTF-8 BOM, which caused `json.load()` to fail during environment creation on Windows
+
+That issue is now handled in `server/tasks.py` by loading the dataset with `utf-8-sig`.
+
+The local heuristic baseline completed successfully after that fix with:
+
+- Task 1: `1.0000`
+- Task 2: `0.8800`
+- Task 3: `0.9400`
+- Overall: `0.9400`
+
 ## What Still Needs Hands-On Verification
 
-The biggest remaining checks are runtime checks, not design checks.
+The biggest remaining checks are merge-state and packaging checks, not first-pass local execution.
 
 Still pending:
 
-1. run the environment locally
-2. run heuristic inference end to end
-3. confirm Docker starts cleanly
-4. record fresh baseline numbers
-5. do a final clean-machine dry run
+1. rerun the heuristic baseline on the latest fully merged branch
+2. confirm Docker starts cleanly
+3. do a clean-machine dry run if possible
+4. record final benchmark numbers only after the merged-state rerun
 
 ## One-Minute Summary
 
@@ -279,4 +297,4 @@ If you come back to this repo later, remember:
 - the agent predicts structured routing fields
 - grading is deterministic with limited partial credit
 - the inference script is the baseline player
-- April 2 is the point where docs and packaging should fully match the code
+- the first local runtime pass is complete, but merged-state validation is still important

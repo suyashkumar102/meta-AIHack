@@ -128,6 +128,21 @@ The state tracks:
 - the final reward is the average of per-ticket scores
 - a small overshoot penalty exists as a safeguard
 
+## Runtime Notes
+
+The repo has now passed an initial local heuristic run.
+
+Current local baseline:
+
+- Task 1: `1.0000`
+- Task 2: `0.8800`
+- Task 3: `0.9400`
+- Overall: `0.9400`
+
+One practical implementation note from runtime validation:
+
+- `data/dataset.json` may be saved with a UTF-8 BOM on Windows, so `server/tasks.py` intentionally loads it with `utf-8-sig`
+
 ## Dataset Shape
 
 Each record includes:
@@ -153,3 +168,4 @@ If coming back later, remember this:
 - the agent predicts structured routing fields
 - the grader gives deterministic partial credit
 - `inference.py` is the baseline agent runner
+- the local heuristic path already works end to end
