@@ -2,15 +2,33 @@
 """
 Inference script for the IT Helpdesk Ticket Routing OpenEnv environment.
 
-Uses the competition-mandated environment variables:
-  API_BASE_URL  - LLM provider base URL
-  MODEL_NAME    - model identifier
-  HF_TOKEN      - authentication token
+Environment variables
+---------------------
+ENV_URL
+    Base URL of the running OpenEnv server.
+    Default: ``http://localhost:8000``
+    Optional — when unset the script connects to the local server on port 8000.
 
-Can run against a local server (default http://localhost:8000) or a
-remote HuggingFace Space URL passed via ENV_URL.
+API_BASE_URL
+    LLM provider base URL (OpenAI-compatible endpoint).
+    Default: ``https://router.huggingface.co/v1``
+    Optional — only used when both MODEL_NAME and HF_TOKEN are set.
 
-Uses the WebSocket-based EnvClient for multi-step episodes.
+MODEL_NAME
+    Model identifier to use for LLM inference (e.g. ``meta-llama/Llama-3.3-70B-Instruct``).
+    Default: ``""`` (empty string)
+    Optional — when unset (or empty) the script runs in heuristic mode without an LLM.
+
+HF_TOKEN
+    HuggingFace authentication token for the LLM provider.
+    Default: ``""`` (empty string)
+    Optional — when unset (or empty) the script runs in heuristic mode without an LLM.
+
+When both MODEL_NAME and HF_TOKEN are set, the script calls the LLM via the OpenAI-compatible
+API at API_BASE_URL. When either is unset, ``llm_client`` is ``None`` and ``build_action()``
+falls back to ``heuristic_action()`` automatically.
+
+Uses the HTTP-based sync EnvClient for multi-step episodes.
 """
 from __future__ import annotations
 
@@ -301,7 +319,7 @@ def run():
         task = available_tasks[task_id]
         print(f"\n--- Task {task_id}: {task['name']} ({task['difficulty']}) ---")
 
-        # Use sync WebSocket client for multi-step episode
+        # Use sync HTTP client for multi-step episode
         sync_client = HelpdeskTicketEnvClient(base_url=ENV_URL).sync()
         with sync_client:
             result = sync_client.reset(seed=SEED, task_id=task_id)
