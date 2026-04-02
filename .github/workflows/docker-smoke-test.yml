@@ -1,0 +1,64 @@
+name: Docker Smoke Test
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Docker image
+        run: docker build -f server/Dockerfile -t helpdesk-ticket-routing .
+
+      - name: Start Docker container
+        run: docker run -d --name helpdesk-ticket-routing -p 8000:7860 helpdesk-ticket-routing
+
+      - name: Wait for health endpoint
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container never became healthy."
+          docker logs helpdesk-ticket-routing || true
+          exit 1
+
+      - name: Check tasks endpoint
+        run: curl -fsS http://127.0.0.1:8000/tasks
+
+      - name: Install repo for inference validation
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -e .
+
+      - name: Run heuristic inference against container
+        env:
+          ENV_URL: http://127.0.0.1:8000
+        run: python inference.py
+
+      - name: Show container logs
+        if: always()
+        run: docker logs helpdesk-ticket-routing || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f helpdesk-ticket-routing || true

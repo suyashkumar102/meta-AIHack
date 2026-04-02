@@ -324,6 +324,8 @@ docker run -p 8000:7860 helpdesk-ticket-routing
 
 If you instead publish the container on another port, set `ENV_URL` accordingly before running `inference.py`.
 
+If local Docker is blocked by machine setup, the repo also includes a GitHub Actions smoke test at `.github/workflows/docker-smoke-test.yml`. That workflow builds the image on a GitHub-hosted runner, starts the container, checks `/health` and `/tasks`, and runs heuristic `inference.py` against the container.
+
 ## API Surface
 
 OpenEnv provides the core environment endpoints, and the repo adds a custom task listing route.
