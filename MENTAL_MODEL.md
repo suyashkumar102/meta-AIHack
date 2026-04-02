@@ -130,7 +130,7 @@ The state tracks:
 
 ## Runtime Notes
 
-The repo has now passed an initial local heuristic run.
+The repo has now passed both the initial local heuristic run and a merged-state rerun on the current `main` branch.
 
 Current local baseline:
 
@@ -138,6 +138,8 @@ Current local baseline:
 - Task 2: `0.8800`
 - Task 3: `0.9400`
 - Overall: `0.9400`
+
+The merged-state rerun matched the same baseline numbers exactly.
 
 One practical implementation note from runtime validation:
 
@@ -168,4 +170,4 @@ If coming back later, remember this:
 - the agent predicts structured routing fields
 - the grader gives deterministic partial credit
 - `inference.py` is the baseline agent runner
-- the local heuristic path already works end to end
+- the local heuristic path now works end to end on the current merged repo state

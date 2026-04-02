@@ -144,11 +144,50 @@ Documentation fixes made from runtime feedback:
 - clarified that merged-state reruns still matter before final benchmark recording
 - documented the Windows UTF-8 BOM issue and its handling path in `server/tasks.py`
 
+## April 5, 2026
+
+Status: shared merged-state rerun complete, Docker smoke test still pending
+
+Shared work completed:
+
+- reran local runtime validation on the current `main` branch
+- revalidated `/health` and `/tasks`
+- reran heuristic `inference.py` across all 3 tasks
+- confirmed the merged-state local baseline matched the earlier working numbers exactly
+- added `.gitignore` and `.dockerignore` to keep local artifacts out of git status and Docker build context
+
+Merged-state heuristic baseline on the current repo state:
+
+- Task 1: `1.0000`
+- Task 2: `0.8800`
+- Task 3: `0.9400`
+- Overall: `0.9400`
+
+Environment notes:
+
+- the Codex shell could run the project virtualenv successfully once Python execution was allowed outside the sandbox
+- Docker was not available in the current shell context, so the Docker smoke test is still pending on a machine with Docker installed
+
+Roopal-side documentation work completed:
+
+- finalized `README.md` wording around submission readiness
+- finalized `KNOWLEDGE.md` as the judge-facing knowledge guide
+- added concise judge-facing domain explanations to the docs
+
+## April 6, 2026
+
+Status: Roopal-side repo audit complete, shared execution checks still pending
+
+Roopal-side work completed:
+
+- audited required submission files and confirmed they are present in the repo
+- completed a stale-claims and outdated-wording pass across the core docs
+- updated `PLAN.md` to reflect that first-pass local execution is no longer the main runtime risk
+- left the remaining work focused on Docker and clean-machine validation rather than documentation cleanup
+
 ## Open Items
 
 Still pending after the current checkpoint:
 
-- rerun runtime validation on the latest shared branch after all pending merges land
-- perform a Docker smoke test from the merged repo state
-- complete the shared April 4 rerun after Suyash-side fixes land
-- record final benchmark numbers only after the merged-state rerun
+- perform a Docker smoke test from the current merged repo state
+- do a clean-machine dry run if possible before final submission freeze

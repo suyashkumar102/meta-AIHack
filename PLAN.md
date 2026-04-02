@@ -126,11 +126,11 @@ The project keeps three tasks:
 
 ### Runtime risk
 
-The repo still needs a proper local execution pass to confirm everything after the latest edits.
+The first local execution pass and a merged-state rerun have already completed successfully. The remaining runtime risk is Docker and clean-machine behavior, not first-pass local execution.
 
 ### Benchmark risk
 
-Fresh scores must be generated and then reflected in docs.
+The current merged-state local benchmark has already been recorded. The remaining benchmark risk is making sure Docker or clean-machine validation does not surface a late behavioral mismatch.
 
 ### Deployment risk
 
