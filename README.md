@@ -1,3 +1,17 @@
+---
+title: IT Helpdesk Ticket Routing OpenEnv
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+app_port: 7860
+tags:
+  - openenv
+  - helpdesk
+  - ticket-routing
+  - customer-support
+---
+
 # IT Helpdesk Ticket Routing OpenEnv
 
 > Meta PyTorch OpenEnv Hackathon Round 1 submission  
@@ -151,6 +165,26 @@ average(per_ticket_scores) - 0.03 * max(0, steps_taken - queue_size)
 ```
 
 The result is clamped to `[0.0, 1.0]`.
+
+## Grounded Scoring
+
+The grader is intentionally not fuzzy by default.
+
+- exact match is the dominant path for every field
+- `assignment_group` and `resolution_action` are exact-match only
+- `priority` only gets proximity credit from the declared table in `server/grader.py`
+- `issue_type` only gets partial credit for a small declared similarity map
+- wrong labels outside those explicit maps score `0.0`
+
+That scoring policy is now backed by checked-in unit tests in `tests/test_grader_unit.py` and `tests/test_tasks_unit.py`.
+
+The label set and partial-credit choices were also reviewed against public IT-support references captured in `analysis/grounding_audit.md`, including:
+
+- `Classification of IT Support Tickets`
+- `Semantic Similarity of IT Support Tickets`
+- `MSDialog`
+
+That grounding pass supported keeping the current similarity map small and explainable. No new issue-type similarity pairs were added from the review.
 
 ## Dataset Snapshot
 
@@ -349,6 +383,8 @@ The repo is already aligned on:
 - typed models
 - grader and reward design
 - packaging metadata and Docker entry point
+- Hugging Face Spaces README frontmatter
+- judge-facing documentation of deterministic, grounded scoring
 
 An April 6 repo audit also confirmed that all required submission files are present:
 
@@ -359,4 +395,8 @@ An April 6 repo audit also confirmed that all required submission files are pres
 Still pending before final submission:
 
 - a Docker smoke test from a machine with Docker installed
+- `openenv validate` evidence on the current merged repo state
+- structured `inference.py` log-format verification on the current merged repo state
 - a final clean-machine dry run if possible before submission freeze
+
+The short TRL / GRPO README example from the roadmap is intentionally deferred until the shared runtime and validation gates are green.

@@ -191,3 +191,37 @@ Still pending after the current checkpoint:
 
 - perform a Docker smoke test from the current merged repo state
 - do a clean-machine dry run if possible before final submission freeze
+
+## April 3, 2026 (Pulled Forward April 4-5 Roopal Scope)
+
+Status: complete for the Roopal-owned roadmap items originally scheduled for April 4 and April 5
+
+Roopal-side work completed:
+
+- expanded `tests/test_grader_unit.py` to lock scorer crispness with exhaustive issue-type and priority-table checks
+- added explicit invariants for task-weight sums, exact-match dominance, and deterministic repeated grading
+- expanded `tests/test_tasks_unit.py` to cover the frozen task difficulty ladder plus dataset coverage across all issue types, priorities, assignment groups, and resolution actions
+- added `analysis/grounding_audit.md` as the internal grounding note requested by the roadmap
+- reviewed candidate issue-type similarity expansions and decided to keep the current similarity map unchanged
+
+Decision notes:
+
+- scorer fuzziness is now proven by tests to exist only where the declared similarity map or priority table allows it
+- no additional issue-type similarity pairs were adopted in this pass because the reviewed candidates were too operationally fuzzy
+
+## April 3, 2026 (Pulled Forward April 6-7 Roopal Scope)
+
+Status: complete for the Roopal-owned roadmap items originally scheduled for April 6 and April 7
+
+Roopal-side work completed:
+
+- added Hugging Face Spaces README frontmatter
+- updated `README.md` with an explicit judge-facing explanation of deterministic, grounded scoring
+- updated `KNOWLEDGE.md` to state clearly that the grader is not fuzzy by default and to reference the grounding audit
+- updated `required.md` with a current compliance snapshot separating already-satisfied requirements from shared pending validation gates
+- completed the final Roopal-side consistency pass across `README.md`, `KNOWLEDGE.md`, and `required.md`
+
+Decision notes:
+
+- no scorer change was needed from the grounding review, so this pass stayed documentation-only
+- the optional TRL / GRPO README example remains deferred until the shared runtime-validation gates are green

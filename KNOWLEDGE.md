@@ -237,11 +237,20 @@ The grader is deterministic and intentionally simple to explain.
 - `assignment_group` gets exact credit
 - `resolution_action` gets exact credit
 
+Just as important, the grader is not fuzzy by default:
+
+- exact matches stay dominant
+- wrong issue types outside the declared similarity map score `0.0`
+- wrong priorities outside the declared proximity table score `0.0`
+- assignment group and resolution action never receive partial credit
+
 Task weighting:
 
 - Task 1: only `issue_type`
 - Task 2: `issue_type` 60%, `priority` 40%
 - Task 3: `issue_type` 35%, `priority` 20%, `assignment_group` 25%, `resolution_action` 20%
+
+This is now proven in checked-in unit tests rather than left as a docs claim.
 
 ## Reward Mental Model
 
@@ -269,6 +278,18 @@ Current structure:
 - follow-up tickets connected through `related_ticket_id`
 
 The dataset is meant to test routing judgment, not just keyword spotting.
+
+## Grounding Note
+
+The taxonomy and limited partial-credit policy were reviewed against public IT-support references recorded in `analysis/grounding_audit.md`.
+
+The grounding inputs used for that review were:
+
+- `Classification of IT Support Tickets`
+- `Semantic Similarity of IT Support Tickets`
+- `MSDialog`
+
+The key conclusion was to keep the similarity map narrow. The current issue-type near misses are defensible, but broader additions would blur operationally distinct routing actions too much this late in the submission cycle.
 
 ## Inference Script In Simple Terms
 
@@ -343,6 +364,17 @@ An April 6 audit confirmed:
 - the docs consistently describe IT helpdesk ticket routing rather than the old email-triage domain
 - the current local benchmark reference is still `1.0000`, `0.8800`, `0.9400`, overall `0.9400`
 - the remaining work is execution validation, not documentation cleanup
+
+### April 6 and April 7 Roopal-side doc pass
+
+That follow-up pass added the remaining Roopal-owned public-clarity items:
+
+- Hugging Face Spaces README frontmatter
+- explicit judge-facing explanation that scoring is deterministic and only partially fuzzy in declared places
+- an internal grounding note tying the label space to public IT-support datasets
+- a refreshed compliance snapshot in `required.md`
+
+The optional TRL / GRPO README example was intentionally deferred because the shared runtime-validation gates are not all green yet.
 
 ## What Still Needs Hands-On Verification
 

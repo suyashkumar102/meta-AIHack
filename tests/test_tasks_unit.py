@@ -9,7 +9,13 @@ import openenv_test_stubs  # noqa: F401
 from models import HelpdeskTicketRecord
 from server import tasks as task_module
 from server.tasks import TASKS, get_task_definition, load_dataset
-from vocabulary import TASK_IDS
+from vocabulary import (
+    ASSIGNMENT_GROUPS,
+    ISSUE_TYPES,
+    PRIORITIES,
+    RESOLUTION_ACTIONS,
+    TASK_IDS,
+)
 
 
 class TasksAndDatasetUnitTests(unittest.TestCase):
@@ -29,6 +35,12 @@ class TasksAndDatasetUnitTests(unittest.TestCase):
                 "assignment_group",
                 "resolution_action",
             ],
+        )
+
+    def test_task_difficulty_ladder_is_frozen(self) -> None:
+        self.assertEqual(
+            [TASKS[task_id]["difficulty"] for task_id in TASK_IDS],
+            ["easy", "medium", "hard"],
         )
 
     def test_invalid_task_id_raises(self) -> None:
@@ -64,20 +76,33 @@ class TasksAndDatasetUnitTests(unittest.TestCase):
         dataset = load_dataset()
         issue_types = {record.issue_type for record in dataset}
 
-        self.assertEqual(
-            issue_types,
-            {
-                "application_support",
-                "billing_license",
-                "feature_request",
-                "general_inquiry",
-                "identity_access",
-                "onboarding",
-                "security_compliance",
-                "service_request",
-                "spam_phishing",
-            },
-        )
+        self.assertEqual(issue_types, set(ISSUE_TYPES))
+
+    def test_dataset_covers_all_defined_priorities(self) -> None:
+        dataset = load_dataset()
+        priorities = {record.priority for record in dataset}
+
+        self.assertEqual(priorities, set(PRIORITIES))
+
+    def test_dataset_covers_all_assignment_groups(self) -> None:
+        dataset = load_dataset()
+        assignment_groups = {record.assignment_group for record in dataset}
+
+        self.assertEqual(assignment_groups, set(ASSIGNMENT_GROUPS))
+
+    def test_dataset_covers_all_resolution_actions(self) -> None:
+        dataset = load_dataset()
+        resolution_actions = {record.resolution_action for record in dataset}
+
+        self.assertEqual(resolution_actions, set(RESOLUTION_ACTIONS))
+
+    def test_dataset_preserves_ambiguous_and_follow_up_cases(self) -> None:
+        dataset = load_dataset()
+        ambiguity_count = sum(1 for record in dataset if record.ambiguity_note)
+        follow_up_count = sum(1 for record in dataset if record.related_ticket_id)
+
+        self.assertGreaterEqual(ambiguity_count, 4)
+        self.assertGreaterEqual(follow_up_count, 3)
 
     def test_load_dataset_accepts_utf8_bom(self) -> None:
         sample = (

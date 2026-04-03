@@ -350,3 +350,26 @@ The project is ready when:
 7. HF deployment checks succeed or are as close to verified as possible before submission
 8. the docs are clean, current, and submission-ready
 9. the repo clearly presents Hackstreet Boys as the team
+
+## Current Compliance Snapshot
+
+As of April 3, 2026, the Roopal-side compliance review says these items are already in place:
+
+- real-world task definition is clear and stable
+- typed models, `reset()`, `step()`, `state()`, and `openenv.yaml` are present in the repo
+- 3-task easy -> medium -> hard ladder is present
+- graders are deterministic and bounded to `[0.0, 1.0]`
+- unit tests now prove scorer crispness, task invariants, and dataset coverage
+- baseline heuristic results are recorded in the docs
+- the README now includes Hugging Face Spaces frontmatter and a judge-facing grounded-scoring explanation
+- an internal grounding audit exists in `analysis/grounding_audit.md`
+
+The items still pending or shared with runtime-side work are:
+
+- `openenv validate` evidence on the merged repo state
+- Docker smoke evidence on the merged repo state
+- Hugging Face deployment ping and reset verification
+- structured `inference.py` log-format verification
+- clean-machine rerun evidence if practical
+
+The roadmap's short TRL / GRPO README example remains optional and should stay deferred until the pending validation items above are green.
