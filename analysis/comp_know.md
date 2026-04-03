@@ -1,275 +1,237 @@
-# Competition Knowledge Base — OpenEnv Hackathon
+# Competition Knowledge Base And Action Plan
 
-> Source: github.com/meta-pytorch/OpenEnv/tree/main/envs  
-> Gathered: April 4, 2026  
-> Purpose: Internal competitive intelligence — NOT for commit/push
+> Source: github.com/meta-pytorch/OpenEnv/tree/main/envs
+> Gathered: April 4, 2026
+> Purpose: Internal competitive intelligence plus action planning - NOT for commit/push
 
 ---
 
-## Full Environment Inventory (27 envs)
+## Full Environment Inventory
 
 | Env | Domain | Complexity | Reward Type | Multi-step? | MCP? |
 |-----|--------|------------|-------------|-------------|------|
 | `atari_env` | Classic games | Medium | Dense | Yes | No |
 | `browsergym_env` | Web browser automation | Very High | Task-based | Yes | No |
-| `calendar_env` | Calendar/scheduling agent | High | SQL verifier | Yes | Yes (MCP) |
+| `calendar_env` | Calendar / scheduling agent | High | SQL verifier | Yes | Yes |
 | `carla_env` | Autonomous driving sim | Very High | Dense | Yes | No |
-| `chat_env` | Conversation/tokenization | Low | Custom transform | Yes | No |
-| `chess_env` | Chess game | Medium | Win/loss | Yes | No |
+| `chat_env` | Conversation / tokenization | Low | Custom transform | Yes | No |
 | `coding_env` | Python code execution | Medium | Exit code / transform | Yes | No |
-| `connect4_env` | Connect 4 game | Low | Win/loss | Yes | No |
-| `dipg_safety_env` | Safety/policy | Medium | Unknown | Yes | No |
-| `dm_control_env` | DeepMind Control Suite | High | Dense | Yes | No |
-| `echo_env` | Reference/minimal | Minimal | Echo | No | No |
-| `finqa_env` | Financial QA (SEC 10-K) | High | Fuzzy numerical | Yes | Yes (MCP) |
-| `finrl_env` | Financial RL trading | High | Portfolio return | Yes | No |
-| `git_env` | Git operations | Medium | Task-based | Yes | No |
-| `grid_world_env` | Grid navigation | Low | Sparse | Yes | No |
-| `julia_env` | Julia code execution | Medium | Exit code | Yes | No |
-| `kernrl` | Kernel/OS operations | High | Unknown | Yes | No |
-| `maze_env` | Maze navigation | Low | Sparse | Yes | No |
-| `openapp_env` | Web app UI (BrowserGym) | Extreme | Task-based | Yes | No |
-| `openspiel_env` | Multi-agent games | High | Game outcome | Yes | No |
-| `reasoning_gym_env` | Reasoning tasks (100+ datasets) | Medium | Exact/partial | Single-step | No |
-| `repl_env` | REPL execution | Medium | Exit code | Yes | No |
-| `snake_env` | Snake game | Low | Score | Yes | No |
-| `sumo_rl_env` | Traffic simulation | High | Traffic flow | Yes | No |
-| `tbench2_env` | Terminal Bench 2 (shell tasks) | High | pytest pass/fail | Yes | No |
-| `textarena_env` | Text-based games | Medium | Game outcome | Yes | No |
-| `unity_env` | Unity 3D simulation | Very High | Task-based | Yes | No |
+| `echo_env` | Reference / minimal | Minimal | Echo | No | No |
+| `finqa_env` | Financial QA | High | Fuzzy numerical | Yes | Yes |
+| `openapp_env` | Web app UI | Extreme | Task-based | Yes | No |
+| `reasoning_gym_env` | Reasoning tasks | Medium | Exact / partial | Single-step | No |
+| `tbench2_env` | Terminal tasks | High | Pytest pass/fail | Yes | No |
+
+This is not the full raw repo dump anymore. It is the subset that matters most for competitive positioning and late-stage prioritization.
 
 ---
 
-## Deep Dives: Most Relevant Envs
+## Most Relevant Competitor Patterns
 
-### 1. `finqa_env` — Financial QA
+### `finqa_env`
 
-**What it does**: Agents answer complex financial questions from SEC 10-K filings using SQL tool calls.
+- strong MCP / tool-using architecture
+- larger dataset than ours
+- binary-style reward with fuzzy numerical matching
+- explicit TRL / GRPO integration story
 
-**Architecture**:
-- Subclasses `MCPEnvironment` (not plain `Environment`) — uses FastMCP with `@mcp.tool` decorators
-- Tools: `get_descriptions`, `get_table_info`, `sql_query`, `submit_answer`
-- Dataset: 290 questions from HuggingFace (`snorkelai/finqa-data`)
-- Max steps: 50 per episode
-- Reward: Binary (1.0 / 0.0) with fuzzy numerical matching (1% relative tolerance + 1.0 absolute tolerance)
-- Handles `\boxed{}` LaTeX format, percentages, fractions, thousands separators, negative parens
+### `coding_env`
 
-**Reward sophistication**: Very high. The `rewards.py` is ~300 lines handling multi-value answers, year-labeled pairs, percentage normalization, and both relative + absolute tolerance checks simultaneously.
+- strongest test story
+- clean transform-based reward separation
+- reference example of strong code quality and architecture hygiene
 
-**Key differentiator**: MCP protocol for tool discovery. Client uses `await env.list_tools()` to discover tools at runtime. This is the most "agentic" env in the repo.
+### `reasoning_gym_env`
 
-**Integration**: Explicitly shows TRL/GRPO integration pattern in README.
+- broadest dataset coverage
+- configurable dataset / size pattern
+- useful deployment references for `openenv push`
 
----
+### `tbench2_env`
 
-### 2. `coding_env` — Python Code Execution
+- strong agentic shell-task realism
+- binary evaluation via pytest
+- little intermediate reward signal
 
-**What it does**: Executes arbitrary Python code in a sandboxed environment.
+### `openapp_env`
 
-**Architecture**:
-- `PythonCodeActEnv` wraps a `PyExecutor` (sandboxed subprocess)
-- `create_safe_coding_transform()` — transform pipeline for reward computation
-- Action: `CodeAction(code: str)`
-- Observation: `CodeObservation(stdout, stderr, exit_code)`
-- State: `CodeState(episode_id, step_count, last_exit_code)`
-- Reward: computed by transform (not in step directly) — extensible pattern
+- highest complexity
+- multimodal / browser-based
+- difficult to beat on ambition, easier to beat on simplicity and reproducibility
 
-**Key differentiator**: Transform-based reward. The environment itself doesn't compute reward — a pluggable `Transform` object does. This is the cleanest separation of concerns in the repo.
+### `calendar_env`
 
-**Testing**: Has both unit tests (`test_python_codeact_reset`, `test_python_codeact_rewards`) and integration tests (`test_coding_env_integration`). Most tested env in the repo.
-
----
-
-### 3. `reasoning_gym_env` — Reasoning Tasks
-
-**What it does**: Wraps the `reasoning-gym` library (100+ reasoning datasets) as a single-step OpenEnv.
-
-**Architecture**:
-- Single-step episodes: `reset()` gives question, `step()` gives score + done=True
-- Composite datasets: mix multiple datasets with weights
-- Dataset persistence: same dataset reused across resets until config changes
-- Supports `dataset_name`, `seed`, `size`, `dataset_specs` in `reset()` kwargs
-- Reward: 0.0–1.0 (dataset-dependent, may use partial credit)
-
-**Key differentiator**: Massive breadth (100+ task types in one env). The `reset()` kwargs pattern for dataset configuration is very clean. Also has `openenv push` CLI for HuggingFace Spaces deployment.
-
-**Scale**: uv.lock is 551KB — large dependency tree from reasoning-gym.
+- enterprise workflow flavor
+- scenario + verifier pattern
+- stronger on MCP sophistication than on reward density
 
 ---
 
-### 4. `tbench2_env` — Terminal Bench 2
+## Structural Patterns Across The Field
 
-**What it does**: Wraps Terminal-Bench-2 shell tasks. Agent executes shell commands and is evaluated by pytest.
+### Packaging
 
-**Architecture**:
-- Two modes: `local` (direct process) and `docker` (per-task container)
-- Rich action type: `exec`, `write`, `view`, `wait`, `kill`, `write_file`, `evaluate`, `close`
-- Session IDs for streaming/non-blocking processes
-- Reward: Binary (pytest pass/fail) on `evaluate` action
-- Intermediate steps: `reward=None`
+- every serious repo has `models.py`, `client.py`, `openenv.yaml`, `pyproject.toml`, `README.md`, and a `server/` package
+- Hugging Face Spaces frontmatter is standard in competitor `README.md` files
+- `.openenvignore` appears in some stronger submissions
 
-**Key differentiator**: Most realistic "agentic" shell environment. The session ID pattern for streaming processes is unique. Docker-in-Docker mode for full fidelity.
+### Reward patterns
 
----
+| Pattern | Examples | Notes |
+|---------|----------|-------|
+| Binary | `finqa_env`, `tbench2_env` | easy to verify, weaker RL signal |
+| Dense partial | ours, games | stronger RL learning signal |
+| Transform-based | `coding_env`, `chat_env` | architecturally clean |
+| SQL / verifier based | `calendar_env` | strong task verification |
 
-### 5. `openapp_env` — Web App UI
+### Testing patterns
 
-**What it does**: Wraps OpenApps (calendar, todo, messenger, maps) + BrowserGym for browser-based UI agent training.
+- many repos have little or no tests
+- `coding_env` is still the strongest example of checked-in testing
+- this makes tests a high-value differentiator for us
 
-**Architecture**:
-- Runs TWO services in Docker: OpenApps server (port 5001) + FastAPI (port 8000)
-- `start.sh` orchestrates both
-- BrowserGym for browser automation (Playwright/Chromium)
-- Docker image: ~5.7GB (includes Chromium)
-- Multimodal: screenshots + DOM observations
+### Deployment patterns
 
-**Key differentiator**: Most complex env in the repo. Multimodal (visual + text). Real browser interaction. Closest to real-world agent deployment.
-
----
-
-### 6. `calendar_env` — Calendar Scheduling
-
-**What it does**: Calendar management tasks with SQL database verification.
-
-**Architecture**:
-- MCP-based (like finqa_env)
-- Has `client_notebooks/` — Jupyter notebook for interactive evaluation
-- Has `mcp_databases/` — SQLite databases for state
-- Scenario-based: `scenario_config.json` drives task + verifiers
-- Verifiers: SQL queries that check task completion
-- Supports OpenAI, Anthropic, Google providers
-
-**Key differentiator**: Scenario config pattern. Verifier-based reward (SQL queries check if the agent actually completed the task). Most "enterprise workflow" env.
-
----
-
-### 7. `chat_env` — Chat/Tokenization
-
-**What it does**: Manages conversation history + tokenization for LLM RL training.
-
-**Architecture**:
-- Action: `ChatAction(tokens: torch.Tensor)` — takes raw model tokens
-- Observation: `ChatObservation(messages, tokens)` — both human-readable + model-ready
-- Transform-based reward (pluggable)
-- Dual representation: messages (human) + tokens (model)
-- No HTTP overhead option: can use directly without server
-
-**Key differentiator**: Designed for direct LLM RL training loop. The only env that takes raw PyTorch tensors as actions. Pairs with GRPO/PPO training loops directly.
-
----
-
-## Structural Patterns Observed Across All Envs
-
-### File Structure (canonical)
-```
-env_name/
-├── __init__.py          # exports
-├── models.py            # Action, Observation, State
-├── client.py            # EnvClient subclass
-├── openenv.yaml         # metadata
-├── pyproject.toml       # packaging
-├── README.md            # HuggingFace Space frontmatter + docs
-└── server/
-    ├── __init__.py
-    ├── app.py           # FastAPI
-    ├── environment.py   # core logic
-    └── Dockerfile
-```
-
-### README Frontmatter (HuggingFace Spaces)
-Every env README has YAML frontmatter:
-```yaml
----
-title: ...
-emoji: ...
-colorFrom: ...
-colorTo: ...
-sdk: docker
-pinned: false
-app_port: 8000
-base_path: /web
-tags:
-  - openenv
----
-```
-This is required for HuggingFace Spaces deployment. Our README does NOT have this.
-
-### openenv.yaml — Minimal Pattern
-Most envs have very minimal `openenv.yaml` (just name + entry_point). Our yaml is the most detailed in the repo.
-
-### Dockerfile Patterns
-- Most use `openenv-base:latest` as base image (not `python:3.11-slim`)
-- Our Dockerfile uses `python:3.11-slim` directly — this is the standalone/HF Spaces pattern
-- The `openenv-base` pattern is for the monorepo CI/CD workflow
-
-### Testing
-- `coding_env`: most tested (unit + integration)
-- Most envs: no tests at all
-- Our env: no tests (matches majority)
-
-### MCP vs HTTP
-- Most envs: plain HTTP (`Environment` base class)
-- `finqa_env`, `calendar_env`: MCP (`MCPEnvironment` base class, FastMCP tools)
-- MCP envs are more "agentic" — tools are discoverable at runtime
-
-### Reward Patterns
-| Pattern | Envs | Description |
-|---------|------|-------------|
-| Binary (0/1) | finqa, tbench2, reasoning_gym | Pass/fail |
-| Dense partial | ours, chess, atari | Continuous [0,1] |
-| Transform-based | coding, chat | Pluggable reward function |
-| SQL verifier | calendar | DB state check |
-| Game outcome | chess, connect4, openspiel | Win/loss/draw |
-
----
-
-## Deployment Patterns
-
-### HuggingFace Spaces
-- `openenv push` CLI command (seen in reasoning_gym README)
-- Spaces get: `/web` (UI), `/docs` (Swagger), `/health`, `/ws` (WebSocket)
-- `base_path: /web` in README frontmatter
-- Our env: missing HF Spaces frontmatter in README
-
-### Docker
-- Most envs: `openenv-base:latest` (monorepo CI)
-- Standalone envs (ours, openapp): `python:3.11-slim`
-- openapp: 5.7GB image (Chromium)
-- Our image: minimal (python:3.11-slim + pip deps)
-
----
-
-## Dataset Sizes
-
-| Env | Dataset Size | Source |
-|-----|-------------|--------|
-| finqa | 290 questions | HuggingFace (snorkelai/finqa-data) |
-| reasoning_gym | 100+ datasets, configurable size | reasoning-gym library |
-| calendar | SQLite DBs | Custom |
-| ours | 45 tickets | Custom (data/dataset.json) |
-| coding | N/A (generates tasks) | N/A |
-| tbench2 | Terminal-Bench-2 repo | GitHub auto-download |
+- Spaces usually expose `/web`, `/docs`, `/health`, and `/ws`
+- `openenv push` is the expected deployment workflow
+- `README` frontmatter and Docker correctness matter more than polish extras
 
 ---
 
 ## Key Technical Observations
 
-1. **MCP is the emerging pattern** for tool-using agents. finqa and calendar both use it. Our env uses plain HTTP — simpler but less "agentic."
+1. MCP is useful, but too big to add late.
+2. Transform-based reward is elegant, but not a deadline-critical refactor.
+3. HF Spaces frontmatter is expected and missing in our repo.
+4. `.openenvignore` is a cheap packaging win.
+5. Configurable datasets are nice, but external dataset merge is too risky late.
+6. Strong tests improve trust more than minor architectural polish.
+7. Dense, deterministic, partial-credit reward is one of our real advantages.
 
-2. **Transform-based rewards** (coding_env, chat_env) are the cleanest architecture for extensible reward shaping. Our reward is hardcoded in `reward.py`.
+---
 
-3. **`openenv push` CLI** exists for HuggingFace Spaces deployment. We should use it.
+## Actionable Inferences
 
-4. **README frontmatter** is required for HF Spaces. Our README is missing it.
+## Critical Missing Items
 
-5. **Composite/configurable datasets** (reasoning_gym) are a strong differentiator. Our dataset is fixed at 45 tickets.
+### 1. README frontmatter for HF Spaces
 
-6. **WebSocket endpoint** (`/ws`) is mentioned in reasoning_gym README as a HF Spaces feature. Our env already has `/ws` via the OpenEnv base.
+This is still the cleanest obvious gap. Add it before submission.
 
-7. **`uv.lock`** files appear in chat_env and reasoning_gym — reproducible dependency locking. We use `requirements.txt` only.
+Recommended fields:
 
-8. **`.openenvignore`** file in finqa_env — analogous to `.dockerignore` for the OpenEnv push CLI.
+```yaml
+---
+title: IT Helpdesk Ticket Routing OpenEnv
+emoji: "ticket"
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+app_port: 7860
+base_path: /web
+tags:
+  - openenv
+  - helpdesk
+  - ticket-routing
+  - nlp
+---
+```
 
-9. **`base_path: /web`** in HF Spaces frontmatter — the web UI is at `/web`, not `/`. Our env would need this.
+### 2. `.openenvignore`
 
-10. **Episode length**: Most envs are either single-step (reasoning_gym) or unbounded (coding, tbench2). Our env is bounded (3–5 steps) — a clean middle ground.
+Cheap packaging improvement. Worth adding.
+
+### 3. Verified deployment assumptions
+
+We should explicitly verify:
+
+- `app_port: 7860`
+- `/health`
+- `/docs`
+- `/ws`
+- `/web`
+
+---
+
+## High-Value Improvements That Still Make Sense
+
+### 4. Strengthen the scorer only in grounded, tested ways
+
+Possible additions to `ISSUE_TYPE_SIMILARITY`:
+
+- `onboarding` vs `service_request`
+- `feature_request` vs `service_request`
+- `security_compliance` vs `identity_access`
+- `billing_license` vs `identity_access`
+
+Only do this if:
+
+- the ambiguity is real
+- the change is backed by tests
+- it does not blur operationally distinct actions too much
+
+### 5. Add richer `history` if low-risk
+
+Candidate additions:
+
+- ticket title
+- predicted fields
+
+This can help multi-step reasoning without changing the core task.
+
+### 6. Add `queue_size` as an optional `reset()` kwarg
+
+Nice RL/training flexibility, but lower priority than tests, scorer crispness, Docker, and deployment readiness.
+
+### 7. Add a short TRL / GRPO example to README
+
+Good judge-facing signal once the repo is already green.
+
+---
+
+## Improvements To Defer
+
+- MCP migration
+- transform-based reward refactor
+- major dataset expansion
+- external dataset merge into runtime
+- broad inference rewrite
+- dependency churn just for polish
+
+---
+
+## Competitive Positioning
+
+### Our strengths
+
+1. strong real-world enterprise domain
+2. dense deterministic reward
+3. partial-credit grading that is still explainable
+4. clean 3-task difficulty ladder
+5. strong heuristic baseline
+6. compact, rerunnable environment design
+
+### Our weaknesses
+
+1. weaker checked-in test story unless we fix it
+2. missing HF Spaces frontmatter unless we fix it
+3. smaller dataset than some top competitors
+4. less ambitious architecture than the strongest simulator-style or MCP-heavy entries
+
+---
+
+## Priority Action List
+
+| Priority | Action | Effort | Impact |
+|----------|--------|--------|--------|
+| P0 | Add tests and prove scorer crispness | 1-2 hrs | High |
+| P0 | Add HF Spaces frontmatter to README | 5 min | High |
+| P0 | Add `.openenvignore` | 5 min | Medium |
+| P1 | Add grounding audit against public support datasets | 1-2 hrs | High |
+| P1 | Expand similarity pairs only if grounded and tested | 20-40 min | Medium |
+| P1 | Add richer `history` if low-risk | 20 min | Medium |
+| P1 | Add TRL / GRPO README example | 30 min | High |
+| P2 | Add `queue_size` kwarg | 15 min | Low |
+| P3 | Expand dataset substantially | 2+ hrs | Medium but risky |
+| P3 | Transform-based reward refactor | 1 hr | Low |

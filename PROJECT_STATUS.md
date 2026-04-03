@@ -136,7 +136,7 @@ Roopal-side work completed:
 - updated `README.md` to reflect the first local runtime pass
 - recorded the current heuristic baseline in repo docs as a working, non-final benchmark
 - updated `KNOWLEDGE.md` to distinguish consistency validation from runtime validation
-- updated `MENTAL_MODEL.md` with runtime-validated notes and the Windows BOM handling detail
+- updated the runtime mental-model notes later merged into `KNOWLEDGE.md`, including the Windows BOM handling detail
 
 Documentation fixes made from runtime feedback:
 
@@ -182,7 +182,7 @@ Roopal-side work completed:
 
 - audited required submission files and confirmed they are present in the repo
 - completed a stale-claims and outdated-wording pass across the core docs
-- updated `PLAN.md` to reflect that first-pass local execution is no longer the main runtime risk
+- updated the planning / requirements doc later consolidated into `required.md` to reflect that first-pass local execution is no longer the main runtime risk
 - left the remaining work focused on Docker and clean-machine validation rather than documentation cleanup
 
 ## Open Items

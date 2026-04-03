@@ -212,8 +212,7 @@ pyproject.toml
 requirements.txt
 README.md
 KNOWLEDGE.md
-PLAN.md
-MENTAL_MODEL.md
+required.md
 ROADMAP.md
 ```
 
@@ -355,7 +354,7 @@ An April 6 repo audit also confirmed that all required submission files are pres
 
 - runtime: `models.py`, `client.py`, `inference.py`, `server/app.py`, `server/environment.py`, `server/grader.py`, `server/reward.py`, `server/tasks.py`
 - data and metadata: `data/dataset.json`, `openenv.yaml`, `pyproject.toml`, `requirements.txt`, `server/Dockerfile`
-- docs and planning: `README.md`, `KNOWLEDGE.md`, `MENTAL_MODEL.md`, `PLAN.md`, `PROJECT_STATUS.md`, `ROADMAP.md`
+- docs and planning: `README.md`, `KNOWLEDGE.md`, `required.md`, `PROJECT_STATUS.md`, `ROADMAP.md`
 
 Still pending before final submission:
 

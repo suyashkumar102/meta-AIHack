@@ -1,6 +1,6 @@
 # IT Helpdesk Ticket Routing OpenEnv - Knowledge Guide
 
-## What The Hackathon Is Looking For
+## What This Repo Needs To Prove
 
 The judges want a real-world environment that follows the OpenEnv pattern and can be understood quickly.
 
@@ -14,9 +14,9 @@ That means this repo needs:
 6. a baseline `inference.py`
 7. Docker and metadata that are easy to rerun
 
-## Why IT Helpdesk Ticket Routing Fits Well
+## Why This Domain Fits
 
-This domain is a strong fit because it is:
+IT helpdesk routing is a strong hackathon fit because it is:
 
 - realistic
 - structured
@@ -32,12 +32,12 @@ This environment simulates a short helpdesk queue where an agent routes one tick
 
 ## Judge-Facing Explanation
 
-If a judge asks why this environment is a strong submission, the concise answer is:
+If a judge asks why this environment is strong, the concise answer is:
 
 1. IT helpdesk routing is a real operational workflow with clear business value.
 2. The input is realistic free-form ticket text, but the output is typed and easy to grade deterministically.
 3. The three-task ladder creates a clean progression from basic classification to full queue routing.
-4. The repo stays judge-friendly because the vocabulary, task labels, and scoring rules are all explicit and frozen.
+4. The repo stays judge-friendly because the vocabulary, task labels, and scoring rules are explicit and frozen.
 
 ## Frozen Project Identity
 
@@ -46,6 +46,34 @@ If a judge asks why this environment is a strong submission, the concise answer 
 - Domain: `IT Helpdesk Ticket Routing`
 - OpenEnv name: `it_helpdesk_ticket_routing_openenv`
 - App environment name: `it_helpdesk_ticket_routing`
+
+## Practical Mental Model
+
+```text
+inference.py
+    |
+    v
+client.py  <---->  server/app.py
+                         |
+                         v
+                server/environment.py
+                  |       |        |
+                  v       v        v
+            grader.py  reward.py  tasks.py
+                                  |
+                                  v
+                           data/dataset.json
+```
+
+The repo is a small OpenEnv stack:
+
+- `inference.py` drives episodes
+- `client.py` talks to the app
+- `server/environment.py` manages queue state and episode flow
+- `server/grader.py` scores actions
+- `server/reward.py` computes step and final reward behavior
+- `server/tasks.py` defines the task ladder and loads the dataset
+- `data/dataset.json` stores the labeled helpdesk tickets
 
 ## Frozen Runtime Vocabulary
 
@@ -145,11 +173,30 @@ On each step, the environment:
 
 Returns the internal state snapshot for debugging or inspection.
 
+## Observation And State At A Glance
+
+The observation exposes:
+
+- task metadata
+- the current ticket
+- queue progress counters
+- history
+- reward and done status
+
+The state tracks:
+
+- current task
+- seed
+- queue ticket IDs
+- current ticket index
+- per-ticket scores
+- total reward
+
 ## Task Design
 
 ### Task 1: Issue Type Classification
 
-The agent only predicts:
+The agent predicts:
 
 - `issue_type`
 
@@ -257,7 +304,7 @@ It supports:
 
 ## Validation Notes
 
-The repo has now gone through two useful validation phases.
+The repo has already gone through two useful validation phases.
 
 ### April 2 consistency pass
 
@@ -273,7 +320,7 @@ What needed to agree:
 
 ### April 3 and April 4 runtime-feedback pass
 
-The first local runtime pass was then completed and surfaced a practical issue:
+The first local runtime pass surfaced one practical issue:
 
 - `data/dataset.json` was saved with a UTF-8 BOM, which caused `json.load()` to fail during environment creation on Windows
 
@@ -288,13 +335,13 @@ The local heuristic baseline completed successfully after that fix with:
 
 A merged-state rerun on the current `main` branch matched those same numbers exactly.
 
-## April 6 Repo Audit
+### April 6 repo audit
 
-An April 6 documentation and repo audit confirmed:
+An April 6 audit confirmed:
 
-- all required runtime, data, metadata, and documentation files are present in the workspace
+- all required runtime, data, metadata, and documentation files are present
 - the docs consistently describe IT helpdesk ticket routing rather than the old email-triage domain
-- the current local benchmark reference is `1.0000`, `0.8800`, `0.9400`, overall `0.9400`
+- the current local benchmark reference is still `1.0000`, `0.8800`, `0.9400`, overall `0.9400`
 - the remaining work is execution validation, not documentation cleanup
 
 ## What Still Needs Hands-On Verification
@@ -312,7 +359,9 @@ If you come back to this repo later, remember:
 
 - the domain is IT helpdesk ticket routing
 - the environment is a short queue, not a single-shot classifier
+- the architecture is a compact OpenEnv stack
+- one ticket is shown at a time
 - the agent predicts structured routing fields
-- grading is deterministic with limited partial credit
-- the inference script is the baseline player
+- the grader gives deterministic partial credit
+- `inference.py` is the baseline agent runner
 - merged-state local validation is complete, and Docker is the main remaining hands-on check

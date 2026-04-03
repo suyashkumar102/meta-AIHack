@@ -12,9 +12,9 @@
 
 - `PROJECT_STATUS.md` is the canonical log of completed work.
 - This roadmap is the remaining execution plan from the current repo state to final submission.
-- `PLAN.md` defines the must-pass gates.
+- `required.md` is now the combined official-requirements and project-compliance file.
 - `KNOWLEDGE.md` defines the current repo truth and judge-facing explanation.
-- `analysis/comp.md`, `analysis/comp_know.md`, and `analysis/inference.md` are internal competitive notes only. Use them to prioritize work, but do not mention competitor repos in public-facing docs.
+- `analysis/comp.md` and `analysis/comp_know.md` are internal competitive notes only. Use them to prioritize work, but do not mention competitor repos in public-facing docs.
 
 ## What We Are Optimizing For
 
@@ -34,7 +34,7 @@ The highest-value wins from now to submission are:
    - do this as an audit / evidence layer, not as a late dataset merge
 
 4. **Submission readiness**
-   - satisfy every requirement from `PLAN.md` and `KNOWLEDGE.md`
+   - satisfy every requirement from `required.md` and `KNOWLEDGE.md`
    - keep the repo easy for judges to understand and rerun
 
 ## Current Repo State
@@ -57,14 +57,19 @@ The remaining work should be treated as targeted strengthening, not broad featur
 
 ## Submission Gates That Must Still Hold
 
-These come directly from `PLAN.md` and `KNOWLEDGE.md`:
+These come directly from `required.md` and `KNOWLEDGE.md`:
 
 - the environment starts correctly
 - `reset()`, `step()`, and `state()` behave correctly
 - 3 tasks exist and remain meaningfully different
 - grader scores stay in `[0.0, 1.0]`
 - `inference.py` runs reproducibly without crashing
+- `inference.py` uses the OpenAI client with `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN`
+- structured stdout logs follow the official `[START]`, `[STEP]`, and `[END]` format
+- `openenv validate` passes
 - Docker builds and starts cleanly
+- HF deployment responds cleanly and reset works
+- inference stays inside the official runtime / machine envelope
 - docs and metadata are current
 - the repo is easy for judges to understand and rerun
 
@@ -80,6 +85,7 @@ These come directly from `PLAN.md` and `KNOWLEDGE.md`:
 - add only safe RL-oriented improvements
 - add external grounding evidence without changing the runtime dataset
 - finish packaging / deployment readiness
+- verify official validation constraints, not just local happy-path behavior
 
 ### Do Not Do Before Submission
 
@@ -108,7 +114,7 @@ Because we are using Codex to generate code, we should optimize for small, bound
 
 **Window:** April 3 to April 4
 
-**Goal:** eliminate the biggest competitive weakness identified in `analysis/comp.md` and `analysis/inference.md`: lack of checked-in tests.
+**Goal:** eliminate the biggest competitive weakness identified in `analysis/comp.md` and `analysis/comp_know.md`: lack of checked-in tests.
 
 ### Must produce
 
@@ -176,7 +182,7 @@ Because we are using Codex to generate code, we should optimize for small, bound
 - assignment group and resolution action remain exact
 - final episode reward stays bounded and deterministic
 
-### Safe improvement candidates from `analysis/inference.md`
+### Safe improvement candidates from `analysis/comp_know.md`
 
 - expand `ISSUE_TYPE_SIMILARITY` with only a few defensible pairs, if backed by grounding review
 - enrich `history` with:
@@ -231,14 +237,17 @@ Because we are using Codex to generate code, we should optimize for small, bound
 
 **Window:** April 6 to April 7
 
-**Goal:** close the submission-readiness gaps surfaced in `analysis/comp_know.md` and `analysis/inference.md`.
+**Goal:** close the submission-readiness gaps surfaced in `analysis/comp_know.md`.
 
 ### Must produce
 
 - Hugging Face Spaces README frontmatter
 - `.openenvignore`
+- `openenv validate` evidence
 - Docker smoke evidence on the merged branch
 - one clean-copy rerun if possible
+- structured inference logging verified against the official format
+- a practical check that inference remains inside the official runtime envelope
 
 ### Nice-to-have only if green
 
@@ -264,6 +273,7 @@ Because we are using Codex to generate code, we should optimize for small, bound
 - no runtime refactors
 - no dataset edits unless they fix a blocker
 - stop risky edits several hours before submission
+- if possible, run the official validator or the closest local equivalent before final push
 
 ## Ownership From Now Until Submission
 
@@ -276,7 +286,6 @@ Primary files:
 - `server/grader.py`
 - `README.md`
 - `KNOWLEDGE.md`
-- `MENTAL_MODEL.md`
 
 Primary responsibilities:
 
@@ -293,6 +302,7 @@ Concrete deliverables:
 - any similarity-matrix update, if justified
 - doc updates if benchmark numbers or scoring explanation change
 - README frontmatter and judge-facing clarity
+- official requirement compliance review through `required.md`
 
 ### Suyash ownership
 
@@ -326,6 +336,7 @@ Concrete deliverables:
 - `.openenvignore`
 - Docker smoke confirmation
 - clean-copy rerun if possible
+- structured inference logging compliance
 
 ### Shared responsibilities
 
@@ -335,6 +346,7 @@ Concrete deliverables:
 - use the GitHub Actions Docker smoke workflow when local Docker is blocked
 - review Codex-generated diffs before accepting them
 - freeze feature work by the end of April 7
+- do not casually change the `[START]`, `[STEP]`, `[END]` inference log format once implemented
 
 ## Date-By-Date Execution Plan
 
@@ -355,6 +367,7 @@ Suyash:
 - scaffold `tests/`
 - begin smoke tests for `reset()`, `step()`, `state()`, and deterministic seeded behavior
 - confirm how integration tests will hit the app cleanly
+- review `required.md` and identify the exact official validation items still not reflected in runtime / inference behavior
 
 Shared checkpoint:
 
@@ -377,6 +390,7 @@ Suyash:
 
 - complete smoke tests
 - add first-pass integration tests for `/health`, `/tasks`, `/reset`, and `/step`
+- begin checking how current `inference.py` differs from the official structured logging requirement
 
 Shared checkpoint:
 
@@ -400,6 +414,7 @@ Suyash:
 - add integration coverage for full seeded episode flow and `state()`
 - add a light heuristic regression path for `inference.py`
 - optionally enrich observation history if tests are already green
+- bring `inference.py` closer to official structured logging format if the change can be done safely
 
 Shared checkpoint:
 
@@ -424,6 +439,8 @@ Suyash:
 - add `.openenvignore`
 - verify Docker smoke workflow on the merged branch
 - check deployment assumptions around `app_port`, `/docs`, `/health`, `/ws`, and `/web`
+- run `openenv validate` or the closest available validation path
+- verify structured inference logging and runtime-envelope expectations
 
 Shared checkpoint:
 
@@ -439,7 +456,7 @@ Primary goal:
 
 Roopal:
 
-- final docs consistency pass across `README.md`, `KNOWLEDGE.md`, and `MENTAL_MODEL.md`
+- final docs consistency pass across `README.md` and `KNOWLEDGE.md`
 - add a short TRL / GRPO usage example only if everything else is already green
 
 Suyash:
@@ -466,6 +483,7 @@ Morning:
 - run final smoke / test slice on the submission branch
 - verify required files are present
 - verify README and metadata are current
+- run the final validation checklist from `required.md`
 
 Afternoon:
 
@@ -493,6 +511,7 @@ Do not cut these:
 3. Docker / deployment validation
 4. grounding audit evidence
 5. final benchmark sanity rerun if behavior changed
+6. official structured inference logging compliance
 
 ## Definition Of Done
 
@@ -502,9 +521,10 @@ The project is ready when:
 2. scoring is demonstrably deterministic and not fuzzy by default
 3. a grounding audit against real public support datasets exists
 4. the heuristic baseline still runs successfully
-5. Docker build and run are validated
-6. docs and metadata are current and judge-friendly
-7. the repo is frozen and submitted on time
+5. the inference path is compliant with the official log format
+6. `openenv validate` and Docker checks are validated
+7. docs and metadata are current and judge-friendly
+8. the repo is frozen and submitted on time
 
 ## Simple Rule To Remember
 
