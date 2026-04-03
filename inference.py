@@ -7,33 +7,34 @@ Environment variables
 ENV_URL
     Base URL of the running OpenEnv server.
     Default: ``http://localhost:8000``
-    Optional — when unset the script connects to the local server on port 8000.
 
 API_BASE_URL
     LLM provider base URL (OpenAI-compatible endpoint).
     Default: ``https://router.huggingface.co/v1``
-    Optional — only used when both MODEL_NAME and HF_TOKEN are set.
 
 MODEL_NAME
-    Model identifier to use for LLM inference (e.g. ``meta-llama/Llama-3.3-70B-Instruct``).
-    Default: ``""`` (empty string)
-    Optional — when unset (or empty) the script runs in heuristic mode without an LLM.
+    Model identifier to use for LLM inference.
+    Default: ``<your-active-model>``
 
 HF_TOKEN
     HuggingFace authentication token for the LLM provider.
-    Default: ``""`` (empty string)
-    Optional — when unset (or empty) the script runs in heuristic mode without an LLM.
+    No default is set.
 
-When both MODEL_NAME and HF_TOKEN are set, the script calls the LLM via the OpenAI-compatible
-API at API_BASE_URL. When either is unset, ``llm_client`` is ``None`` and ``build_action()``
-falls back to ``heuristic_action()`` automatically.
+LOCAL_IMAGE_NAME
+    Optional compatibility variable from the sample inference pattern.
+    This script does not use ``from_docker_image()``, so the value is unused here.
 
-Uses the HTTP-based sync EnvClient for multi-step episodes.
+When both MODEL_NAME and HF_TOKEN are set explicitly, the script calls the LLM via the
+OpenAI-compatible API at API_BASE_URL. Otherwise it falls back to the deterministic
+heuristic baseline automatically.
+
+All stdout logs use the required structured tags: ``[START]``, ``[STEP]``, and ``[END]``.
 """
 from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 import httpx
 from openai import OpenAI
@@ -53,9 +54,13 @@ from vocabulary import (
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "")
-HF_TOKEN = os.getenv("HF_TOKEN", "")
+DEFAULT_API_BASE_URL = "https://router.huggingface.co/v1"
+DEFAULT_MODEL_NAME = "<your-active-model>"
+
+API_BASE_URL = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
+MODEL_NAME = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
+HF_TOKEN = os.getenv("HF_TOKEN")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 ENV_URL = os.getenv("ENV_URL", "http://localhost:8000")
 
 SEED = 42
@@ -65,9 +70,13 @@ TASKS = list(TASK_IDS)
 # LLM helper
 # ---------------------------------------------------------------------------
 
-llm_client: OpenAI | None = None
 
-if MODEL_NAME and HF_TOKEN:
+def llm_mode_enabled() -> bool:
+    return bool(HF_TOKEN) and MODEL_NAME != DEFAULT_MODEL_NAME
+
+
+llm_client: OpenAI | None = None
+if llm_mode_enabled():
     llm_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 
@@ -119,6 +128,10 @@ def call_llm(ticket: dict, allowed_fields: list[str], instructions: str) -> dict
         return json.loads(text)
     except json.JSONDecodeError:
         return {}
+
+
+def emit_log(tag: str, **payload: Any) -> None:
+    print(f"[{tag}] {json.dumps(payload, sort_keys=True, ensure_ascii=True)}")
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +275,7 @@ def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
     priority = heuristic_priority(text)
     resolution_action = heuristic_resolution_action(text, issue_type)
 
-    result: dict = {}
+    result: dict[str, str] = {}
     if "issue_type" in allowed_fields:
         result["issue_type"] = issue_type
     if "priority" in allowed_fields:
@@ -278,48 +291,62 @@ def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
 
 def build_action(
     ticket: dict, allowed_fields: list[str], instructions: str
-) -> HelpdeskTicketAction:
+) -> tuple[HelpdeskTicketAction, str, str | None]:
     heuristic_dict = heuristic_action(ticket, allowed_fields)
 
     if llm_client is None:
-        return HelpdeskTicketAction(**heuristic_dict)
+        return HelpdeskTicketAction(**heuristic_dict), "heuristic", None
 
-    llm_dict = call_llm(ticket, allowed_fields, instructions)
     try:
-        return HelpdeskTicketAction(**llm_dict)
+        llm_dict = call_llm(ticket, allowed_fields, instructions)
+        candidate = {
+            field: llm_dict[field]
+            for field in allowed_fields
+            if llm_dict.get(field) is not None
+        }
+        if not candidate:
+            raise ValueError("LLM returned no allowed fields")
+        return HelpdeskTicketAction(**candidate), "llm", None
     except Exception as exc:
-        print(f"  Falling back to heuristic action due to invalid LLM output: {exc}")
-        return HelpdeskTicketAction(**heuristic_dict)
+        return (
+            HelpdeskTicketAction(**heuristic_dict),
+            "heuristic_fallback",
+            str(exc),
+        )
 
 
 # ---------------------------------------------------------------------------
-# Main loop using WebSocket client for multi-step episodes
+# Main loop using the HTTP-based sync EnvClient for multi-step episodes
 # ---------------------------------------------------------------------------
 
-def run():
-    # Quick HTTP health check
+
+def run() -> None:
     http = httpx.Client(base_url=ENV_URL, timeout=30.0)
     health = http.get("/health")
     health.raise_for_status()
-    print(f"Connected to {ENV_URL}: {health.json()}")
 
     tasks_resp = http.get("/tasks")
     tasks_resp.raise_for_status()
     available_tasks = {t["id"]: t for t in tasks_resp.json()["tasks"]}
-    print(f"Available tasks: {[t['name'] for t in available_tasks.values()]}")
     http.close()
 
     all_results: dict[int, dict[str, float | int]] = {}
 
     for task_id in TASKS:
         if task_id not in available_tasks:
-            print(f"Task {task_id} not available, skipping")
             continue
 
         task = available_tasks[task_id]
-        print(f"\n--- Task {task_id}: {task['name']} ({task['difficulty']}) ---")
+        emit_log(
+            "START",
+            env_url=ENV_URL,
+            mode="llm" if llm_client is not None else "heuristic",
+            seed=SEED,
+            task_difficulty=task["difficulty"],
+            task_id=task_id,
+            task_name=task["name"],
+        )
 
-        # Use sync HTTP client for multi-step episode
         sync_client = HelpdeskTicketEnvClient(base_url=ENV_URL).sync()
         with sync_client:
             result = sync_client.reset(seed=SEED, task_id=task_id)
@@ -333,37 +360,54 @@ def run():
                 if ticket is None:
                     break
 
-                allowed = obs.allowed_fields
-                instructions = obs.instructions
-
-                action = build_action(ticket, allowed, instructions)
+                action, action_source, fallback_reason = build_action(
+                    ticket,
+                    obs.allowed_fields,
+                    obs.instructions,
+                )
                 result = sync_client.step(action)
                 obs = result.observation
 
                 step_num += 1
-                print(f"  Step {step_num}: reward={result.reward} done={result.done}")
-
+                reward = float(result.reward or 0.0)
                 if result.reward is not None:
-                    task_step_rewards.append(float(result.reward))
+                    task_step_rewards.append(reward)
+
+                emit_log(
+                    "STEP",
+                    action=action.model_dump(exclude_none=True),
+                    action_source=action_source,
+                    done=bool(result.done),
+                    fallback_reason=fallback_reason,
+                    reward=reward,
+                    step=step_num,
+                    task_id=task_id,
+                    ticket_id=ticket["ticket_id"],
+                )
 
         final_reward = task_step_rewards[-1] if task_step_rewards else 0.0
         all_results[task_id] = {
             "final_reward": final_reward,
             "step_count": step_num,
         }
-        print(f"  Task {task_id} final reward: {final_reward:.4f}")
+        emit_log(
+            "END",
+            final_reward=round(final_reward, 4),
+            step_count=step_num,
+            task_id=task_id,
+            task_name=task["name"],
+        )
 
-    # Summary
-    print("\n=== RESULTS ===")
-    overall: list[float] = []
-    for tid in TASKS:
-        if tid in all_results:
-            final_reward = float(all_results[tid]["final_reward"])
-            step_count = int(all_results[tid]["step_count"])
-            overall.append(final_reward)
-            print(f"Task {tid}: final_reward={final_reward:.4f} ({step_count} steps)")
-    if overall:
-        print(f"Overall: {sum(overall) / len(overall):.4f}")
+    overall = [
+        float(all_results[task_id]["final_reward"])
+        for task_id in TASKS
+        if task_id in all_results
+    ]
+    emit_log(
+        "END",
+        overall_reward=round(sum(overall) / len(overall), 4) if overall else 0.0,
+        tasks_completed=len(overall),
+    )
 
 
 if __name__ == "__main__":
