@@ -1,0 +1,11 @@
+# Exclude test suites, analysis docs, bug reports, transcripts, and VCS/cache dirs
+tests/
+analysis/
+bugs/
+transcripts/
+.git/
+__pycache__/
+
+# Exclude config/meta files not needed at runtime
+.gitignore
+.dockerignore

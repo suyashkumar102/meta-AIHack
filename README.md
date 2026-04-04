@@ -273,14 +273,14 @@ pip install -e .
 Start the environment locally:
 
 ```bash
-uvicorn server.app:app --host 0.0.0.0 --port 8000
+uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```
 
 Basic checks:
 
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/tasks
+curl http://localhost:7860/health
+curl http://localhost:7860/tasks
 ```
 
 ## Running The Baseline Inference Script
@@ -312,7 +312,7 @@ python inference.py
 Optional target:
 
 - `ENV_URL`
-- default value: `http://localhost:8000`
+- default value: `http://localhost:7860`
 
 ## Runtime Validation Snapshot
 
@@ -369,7 +369,6 @@ OpenEnv provides the core environment endpoints, and the repo adds a custom task
 | POST | `/reset` | start a new episode |
 | POST | `/step` | submit an action |
 | GET | `/state` | inspect internal state |
-| WebSocket | `/ws` | persistent multi-step client channel |
 | GET | `/tasks` | list task metadata |
 | GET | `/docs` | interactive API docs |
 

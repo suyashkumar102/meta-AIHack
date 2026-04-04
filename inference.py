@@ -61,7 +61,7 @@ API_BASE_URL = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
 MODEL_NAME = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 HF_TOKEN = os.getenv("HF_TOKEN")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
-ENV_URL = os.getenv("ENV_URL", "http://localhost:8000")
+ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 
 SEED = 42
 TASKS = list(TASK_IDS)
@@ -403,11 +403,8 @@ def run() -> None:
         for task_id in TASKS
         if task_id in all_results
     ]
-    emit_log(
-        "END",
-        overall_reward=round(sum(overall) / len(overall), 4) if overall else 0.0,
-        tasks_completed=len(overall),
-    )
+    overall_avg = round(sum(overall) / len(overall), 4) if overall else 0.0
+    print(f"Overall average reward: {overall_avg:.4f}")
 
 
 if __name__ == "__main__":
