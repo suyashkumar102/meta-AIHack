@@ -38,6 +38,8 @@ evaluation:
     max: 1.0
   deterministic: true
 
+app_port: 7860
+
 grading: normalized
 reproducible: true
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -16,10 +17,13 @@ def install_openenv_type_stubs() -> None:
         pass
 
     class Observation(BaseModel):
-        pass
+        done: bool = False
+        reward: Optional[float] = None
+        metadata: dict[str, Any] = {}
 
     class State(BaseModel):
-        pass
+        episode_id: Optional[str] = None
+        step_count: int = 0
 
     types_module.Action = Action
     types_module.Observation = Observation
