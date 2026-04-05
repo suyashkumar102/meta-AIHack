@@ -14,7 +14,7 @@
 - This roadmap is the remaining execution plan from the current repo state to final submission.
 - `required.md` is now the combined official-requirements and project-compliance file.
 - `KNOWLEDGE.md` defines the current repo truth and judge-facing explanation.
-- `analysis/comp.md` and `analysis/comp_know.md` are internal competitive notes only. Use them to prioritize work, but do not mention competitor repos in public-facing docs.
+- `analysis/competition_notes.md` is the merged internal competitive note. Use it to prioritize work, but do not mention competitor repos in public-facing docs.
 
 ## What We Are Optimizing For
 
@@ -114,7 +114,7 @@ Because we are using Codex to generate code, we should optimize for small, bound
 
 **Window:** April 3 to April 4
 
-**Goal:** eliminate the biggest competitive weakness identified in `analysis/comp.md` and `analysis/comp_know.md`: lack of checked-in tests.
+**Goal:** eliminate the biggest competitive weakness identified in `analysis/competition_notes.md`: lack of checked-in tests.
 
 ### Must produce
 
@@ -182,7 +182,7 @@ Because we are using Codex to generate code, we should optimize for small, bound
 - assignment group and resolution action remain exact
 - final episode reward stays bounded and deterministic
 
-### Safe improvement candidates from `analysis/comp_know.md`
+### Safe improvement candidates from `analysis/competition_notes.md`
 
 - expand `ISSUE_TYPE_SIMILARITY` with only a few defensible pairs, if backed by grounding review
 - enrich `history` with:
@@ -237,7 +237,7 @@ Because we are using Codex to generate code, we should optimize for small, bound
 
 **Window:** April 6 to April 7
 
-**Goal:** close the submission-readiness gaps surfaced in `analysis/comp_know.md`.
+**Goal:** close the submission-readiness gaps surfaced in `analysis/competition_notes.md`.
 
 ### Must produce
 

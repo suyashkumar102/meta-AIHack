@@ -374,16 +374,26 @@ That follow-up pass added the remaining Roopal-owned public-clarity items:
 - an internal grounding note tying the label space to public IT-support datasets
 - a refreshed compliance snapshot in `required.md`
 
-The optional TRL / GRPO README example was intentionally deferred because the shared runtime-validation gates are not all green yet.
+The optional TRL / GRPO README example remains intentionally deferred because it is optional and lower priority than freeze-phase stability.
 
-## What Still Needs Hands-On Verification
+## April 3-7 Status
 
-The biggest remaining checks are packaging and clean-machine checks, not merge-state local execution.
+The roadmap through April 7 is now closed in the current repo state.
 
-Still pending:
+That means the repo now has:
 
-1. confirm Docker starts cleanly
-2. do a clean-machine dry run if possible
+1. checked-in unit, smoke, and integration tests
+2. Docker smoke coverage through the GitHub Actions workflow
+3. a clean-copy install-and-run pass
+4. structured `inference.py` logging verification
+5. a passing local `openenv validate` result after checking in `uv.lock`
+
+## Submission-Day Reminders
+
+The remaining work belongs to the April 8 submission window rather than the April 3 to April 7 implementation window:
+
+1. rerun the final sanity slice on the submission branch
+2. verify the live Hugging Face Space ping and reset path after the final push if a fresh deployment is created
 
 ## One-Minute Summary
 
@@ -396,4 +406,4 @@ If you come back to this repo later, remember:
 - the agent predicts structured routing fields
 - the grader gives deterministic partial credit
 - `inference.py` is the baseline agent runner
-- merged-state local validation is complete, and Docker is the main remaining hands-on check
+- merged-state validation, Docker smoke coverage, clean-copy rerun, and local validator readiness are all now in place

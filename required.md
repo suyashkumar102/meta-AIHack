@@ -327,7 +327,7 @@ The project keeps three tasks:
 
 ### Runtime risk
 
-The first local execution pass and merged-state rerun have already succeeded. The remaining runtime risk is Docker, clean-machine behavior, and official-validator-style behavior, not first-pass local execution.
+The first local execution pass, merged-state rerun, clean-copy rerun, and local validator pass have already succeeded. The remaining runtime risk is submission-day deployment execution, not first-pass local behavior.
 
 ### Benchmark risk
 
@@ -335,7 +335,7 @@ The current local benchmark is already recorded. Remaining benchmark risk is whe
 
 ### Deployment risk
 
-Docker, HF Spaces, `openenv validate`, and structured inference logging should be verified before the final submission window closes.
+Docker smoke coverage, `openenv validate`, and structured inference logging are now verified in the repo state. The remaining deployment risk is the live Hugging Face Space ping and reset check after the final push if a fresh deployment is created.
 
 ## Definition Of Done
 
@@ -353,23 +353,27 @@ The project is ready when:
 
 ## Current Compliance Snapshot
 
-As of April 3, 2026, the Roopal-side compliance review says these items are already in place:
+As of April 7, 2026, the roadmap gates through the end of the freeze window are in place:
 
 - real-world task definition is clear and stable
 - typed models, `reset()`, `step()`, `state()`, and `openenv.yaml` are present in the repo
 - 3-task easy -> medium -> hard ladder is present
 - graders are deterministic and bounded to `[0.0, 1.0]`
 - unit tests now prove scorer crispness, task invariants, and dataset coverage
+- smoke tests now prove environment behavior, seeded determinism, score bounds, and full-episode completion
+- integration tests now cover `/health`, `/tasks`, `/reset`, `/step`, `/state`, full seeded episodes, and heuristic regression
 - baseline heuristic results are recorded in the docs
 - the README now includes Hugging Face Spaces frontmatter and a judge-facing grounded-scoring explanation
 - an internal grounding audit exists in `analysis/grounding_audit.md`
+- `.openenvignore` is present
+- Docker smoke coverage exists through the checked-in GitHub Actions workflow and recorded April 6 run
+- `inference.py` structured `[START]`, `[STEP]`, and `[END]` logging is verified
+- `uv.lock` is checked in and `openenv validate` now passes on the current repo state
+- a clean-copy install-and-run pass has been completed
 
-The items still pending or shared with runtime-side work are:
+The remaining April 8 work is operational rather than implementation-heavy:
 
-- `openenv validate` evidence on the merged repo state
-- Docker smoke evidence on the merged repo state
 - Hugging Face deployment ping and reset verification
-- structured `inference.py` log-format verification
-- clean-machine rerun evidence if practical
+- the final submission-branch sanity rerun before push if any last-minute packaging-only change lands
 
-The roadmap's short TRL / GRPO README example remains optional and should stay deferred until the pending validation items above are green.
+The roadmap's short TRL / GRPO README example remains optional and is still deferred because it is not required for submission readiness.

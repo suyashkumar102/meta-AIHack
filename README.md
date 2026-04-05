@@ -335,7 +335,7 @@ Current local heuristic results:
 | Full Ticket Routing | `0.9400` |
 | Overall | `0.9400` |
 
-The merged-state rerun matched these same numbers exactly, so they are the current benchmark reference for the repo. A Docker smoke test and clean-machine rerun are still recommended before final submission freeze.
+The merged-state rerun matched these same numbers exactly, so they are the current benchmark reference for the repo. The April 6 to April 7 validation pass then closed the remaining roadmap gates with Docker smoke coverage via GitHub Actions, a clean-copy install-and-run rerun, structured inference-log verification, and a passing local `openenv validate` check after checking in `uv.lock`.
 
 ### Windows note
 
@@ -397,11 +397,17 @@ An April 6 repo audit also confirmed that all required submission files are pres
 - data and metadata: `data/dataset.json`, `openenv.yaml`, `pyproject.toml`, `requirements.txt`, `server/Dockerfile`
 - docs and planning: `README.md`, `KNOWLEDGE.md`, `required.md`, `PROJECT_STATUS.md`, `ROADMAP.md`
 
-Still pending before final submission:
+Roadmap status through April 7 is complete:
 
-- a Docker smoke test from a machine with Docker installed
-- `openenv validate` evidence on the current merged repo state
-- structured `inference.py` log-format verification on the current merged repo state
-- a final clean-machine dry run if possible before submission freeze
+- unit, smoke, and integration tests are checked in and green
+- Docker smoke coverage exists through `.github/workflows/docker-smoke-test.yml`
+- `openenv validate` now passes on the current repo state
+- structured `inference.py` logging is verified by tests and the merged-state rerun
+- a clean-copy install-and-run pass has been completed
 
-The short TRL / GRPO README example from the roadmap is intentionally deferred until the shared runtime and validation gates are green.
+The remaining April 8 work is operational rather than implementation-heavy:
+
+- run the final submission-branch sanity slice before pushing
+- perform the live Hugging Face Space ping and reset check on the deployed submission artifact if a fresh deployment is created
+
+The short TRL / GRPO README example from the roadmap remains intentionally deferred because it is optional and lower priority than freeze-phase stability.
