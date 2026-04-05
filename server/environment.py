@@ -116,6 +116,7 @@ class HelpdeskTicketRoutingEnvironment(
             self._state.current_ticket_index += 1
             is_done = self._state.current_ticket_index >= len(self._queue)
             self._state.last_step_reward = 0.0
+            self._state.reward = 0.0
             self._state.done = is_done
             if is_done:
                 traj_reward = compute_trajectory_reward(
@@ -156,6 +157,7 @@ class HelpdeskTicketRoutingEnvironment(
         self._state.history_entries.append(history_entry)
 
         self._state.last_step_reward = final_reward
+        self._state.reward = final_reward
         self._state.done = is_done
 
         return self._build_observation(task, done=is_done, reward=final_reward)

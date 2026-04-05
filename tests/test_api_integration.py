@@ -400,7 +400,7 @@ class TestHeuristicInferenceRegression(unittest.TestCase):
         import inference as _inf
         cls._heuristic_action = staticmethod(_inf.heuristic_action)
         cls._SEED = _inf.SEED
-        cls._TASKS = list(_inf.TASKS)
+        cls._TASKS = list(_inf.TASK_IDS)
 
     def _run_heuristic_episode(self, task_id: int) -> float:
         """Run one full heuristic episode for the given task_id via TestClient.
