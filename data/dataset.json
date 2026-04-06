@@ -538,6 +538,42 @@
         "resolution_action":  "escalate",
         "ambiguity_note":  null,
         "related_ticket_id":  "ticket-030"
+    },
+    {
+        "ticket_id":  "TKT-NONDEFAULT-001",
+        "title":  "Billing question from free-tier account",
+        "requester":  "user@freetier.io",
+        "description":  "I have a question about my invoice but I am on the free plan and there is no charge. The billing team cannot action this; please route to service desk for general assistance.",
+        "issue_type":  "billing_license",
+        "priority":  "low",
+        "assignment_group":  "service_desk",
+        "resolution_action":  "fulfill",
+        "ambiguity_note":  "Account tier is free; billing team cannot action, routed to service desk",
+        "related_ticket_id":  null
+    },
+    {
+        "ticket_id":  "TKT-NONDEFAULT-002",
+        "title":  "App vulnerability flagged in compliance scan",
+        "requester":  "security@clientcorp.com",
+        "description":  "Our compliance scan flagged a product-specific vulnerability in the application layer. This is not a general security policy issue but an app bug requiring the application team to remediate.",
+        "issue_type":  "security_compliance",
+        "priority":  "high",
+        "assignment_group":  "application_team",
+        "resolution_action":  "escalate",
+        "ambiguity_note":  "Compliance issue is product-specific (app vulnerability), routed to app team",
+        "related_ticket_id":  null
+    },
+    {
+        "ticket_id":  "TKT-NONDEFAULT-003",
+        "title":  "Contractor onboarding blocked by access issue",
+        "requester":  "pm@contractorco.com",
+        "description":  "A new contractor cannot complete onboarding because their account access is blocked by a permissions error. The onboarding team cannot resolve access issues; routing to service desk.",
+        "issue_type":  "onboarding",
+        "priority":  "medium",
+        "assignment_group":  "service_desk",
+        "resolution_action":  "fulfill",
+        "ambiguity_note":  "Contractor onboarding blocked by access issue, routed to service desk",
+        "related_ticket_id":  null
     }
 ]
 

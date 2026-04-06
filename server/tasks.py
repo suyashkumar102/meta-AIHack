@@ -13,7 +13,8 @@ TASKS = {
         "name": "Issue Type Classification",
         "difficulty": "easy",
         "instructions": (
-            "Read the ticket and select the single best IT issue type."
+            "Read the ticket and select the single best IT issue type. "
+            "You may investigate first, then submit a final routing answer."
         ),
         "allowed_fields": ["issue_type"],
     },
@@ -23,7 +24,8 @@ TASKS = {
         "difficulty": "medium",
         "instructions": (
             "Read the ticket, select the best IT issue type, and estimate the "
-            "correct operational priority."
+            "correct operational priority. If the observation includes ambiguity "
+            "or follow-up context, use it. You may investigate before you submit."
         ),
         "allowed_fields": ["issue_type", "priority"],
     },
@@ -33,7 +35,9 @@ TASKS = {
         "difficulty": "hard",
         "instructions": (
             "Perform full helpdesk routing by selecting the best issue type, "
-            "priority, assignment group, and resolution action for the ticket."
+            "priority, assignment group, and resolution action for the ticket. "
+            "Use any ambiguity notes or related-ticket previews when present. "
+            "You may investigate with tools before you submit the final action."
         ),
         "allowed_fields": [
             "issue_type",

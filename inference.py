@@ -20,6 +20,15 @@ HF_TOKEN
     HuggingFace authentication token for the LLM provider.
     No default is set.
 
+TASK_ID
+    Optional OpenEnv task ID to run. When unset, the script defaults to the
+    first available task so it still emits exactly one ``[START]`` ... ``[END]``
+    block for evaluator-style runs.
+
+RUN_ALL_TASKS
+    Optional local-development override. Set to ``1`` to run every available
+    task in sequence and print the aggregate closing ``[END]`` summary.
+
 LOCAL_IMAGE_NAME
     Optional compatibility variable from the sample inference pattern.
     This script does not use ``from_docker_image()``, so the value is unused here.
@@ -64,7 +73,12 @@ LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 
 SEED = 42
-TASKS = list(TASK_IDS)
+TASK_ID_ENV = os.getenv("TASK_ID")
+RUN_ALL_TASKS_ENV = os.getenv("RUN_ALL_TASKS", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 # ---------------------------------------------------------------------------
 # LLM helper
@@ -99,13 +113,36 @@ Return ONLY valid JSON with the requested fields. No markdown, no explanation.""
 
 def call_llm(ticket: dict, allowed_fields: list[str], instructions: str) -> dict:
     assert llm_client is not None, "LLM client not configured"
+    ambiguity_note = ticket.get("ambiguity_note")
+    related_preview = ticket.get("related_ticket_preview") or {}
+    last_tool_result = ticket.get("last_tool_result")
+    extra_context_lines: list[str] = []
+    if ambiguity_note:
+        extra_context_lines.append(f"Ambiguity note: {ambiguity_note}")
+    if related_preview:
+        extra_context_lines.extend(
+            [
+                "Related ticket preview:",
+                f"- Title: {related_preview.get('title', '')}",
+                f"- Requester: {related_preview.get('requester', '')}",
+                f"- Description: {related_preview.get('description', '')}",
+            ]
+        )
+    if last_tool_result is not None:
+        extra_context_lines.append(
+            "Investigation result: " + json.dumps(last_tool_result, sort_keys=True)
+        )
+    extra_context_block = ""
+    if extra_context_lines:
+        extra_context_block = "\n" + "\n".join(extra_context_lines)
 
     user_msg = (
         f"Instructions: {instructions}\n\n"
         f"Allowed fields: {', '.join(allowed_fields)}\n\n"
         f"Title: {ticket['title']}\n"
         f"Requester: {ticket['requester']}\n"
-        f"Description: {ticket['description']}\n\n"
+        f"Description: {ticket['description']}"
+        f"{extra_context_block}\n\n"
         f"Respond with JSON containing ONLY these fields: {', '.join(allowed_fields)}"
     )
 
@@ -132,6 +169,29 @@ def call_llm(ticket: dict, allowed_fields: list[str], instructions: str) -> dict
 
 def emit_log(tag: str, **payload: Any) -> None:
     print(f"[{tag}] {json.dumps(payload, sort_keys=True, ensure_ascii=True)}")
+
+
+def get_tasks_to_run(available_tasks: dict) -> list[int]:
+    available_task_ids = sorted(int(task_id) for task_id in available_tasks)
+    if TASK_ID_ENV:
+        try:
+            task_id = int(TASK_ID_ENV)
+        except ValueError:
+            print(f"[ERROR] TASK_ID={TASK_ID_ENV!r} is not a valid integer", flush=True)
+            raise SystemExit(1)
+        if task_id not in available_task_ids:
+            print(
+                f"[ERROR] TASK_ID={task_id} not in available tasks {available_task_ids}",
+                flush=True,
+            )
+            raise SystemExit(1)
+        return [task_id]
+    if RUN_ALL_TASKS_ENV:
+        return available_task_ids
+    if not available_task_ids:
+        return []
+    # Default to a single task so evaluation emits exactly one START/END block.
+    return [available_task_ids[0]]
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +324,18 @@ def heuristic_resolution_action(text: str, issue_type: str) -> str:
 
 
 def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
-    text = (ticket.get("title", "") + " " + ticket.get("description", "")).lower()
+    related_preview = ticket.get("related_ticket_preview") or {}
+    last_tool_result = ticket.get("last_tool_result") or {}
+    text = " ".join(
+        [
+            ticket.get("title", ""),
+            ticket.get("description", ""),
+            ticket.get("ambiguity_note", ""),
+            related_preview.get("title", ""),
+            related_preview.get("description", ""),
+            json.dumps(last_tool_result, sort_keys=True),
+        ]
+    ).lower()
 
     issue_type = "general_inquiry"
     for kw, mapped_issue_type in KEYWORD_ISSUE_TYPES.items():
@@ -315,6 +386,31 @@ def build_action(
         )
 
 
+def should_investigate(ticket: dict, history: list[dict[str, Any]]) -> tuple[bool, str | None]:
+    if not ticket:
+        return False, None
+    current_ticket_id = ticket.get("ticket_id")
+    already_investigated = any(
+        entry.get("ticket_id") == current_ticket_id
+        and entry.get("predicted", {}).get("action_type") == "investigate"
+        for entry in history
+    )
+    if already_investigated:
+        return False, None
+    if ticket.get("related_ticket_id"):
+        return True, "lookup_related_ticket"
+    if ticket.get("ambiguity_note"):
+        return True, "lookup_requester_history"
+    return False, None
+
+
+def merge_ticket_context(ticket: dict, observation: Any) -> dict:
+    merged_ticket = dict(ticket)
+    if getattr(observation, "last_tool_result", None) is not None:
+        merged_ticket["last_tool_result"] = observation.last_tool_result
+    return merged_ticket
+
+
 # ---------------------------------------------------------------------------
 # Main loop using the HTTP-based sync EnvClient for multi-step episodes
 # ---------------------------------------------------------------------------
@@ -332,7 +428,12 @@ def run() -> None:
 
     all_results: dict[int, dict[str, float | int]] = {}
 
-    for task_id in TASKS:
+    tasks_to_run = get_tasks_to_run(available_tasks)
+    if not tasks_to_run:
+        return
+    single_task_mode = len(tasks_to_run) == 1
+
+    for task_id in tasks_to_run:
         if task_id not in available_tasks:
             continue
 
@@ -360,8 +461,40 @@ def run() -> None:
                 if ticket is None:
                     break
 
+                investigate, tool_name = should_investigate(ticket, obs.history)
+                if (
+                    investigate
+                    and tool_name is not None
+                    and getattr(obs, "investigation_budget_remaining", 0) > 0
+                ):
+                    tool_action = HelpdeskTicketAction(
+                        action_type="investigate",
+                        tool_name=tool_name,
+                        tool_target_ticket_id=ticket.get("related_ticket_id"),
+                    )
+                    result = sync_client.step(tool_action)
+                    obs = result.observation
+                    step_num += 1
+                    emit_log(
+                        "STEP",
+                        action=tool_action.model_dump(exclude_none=True),
+                        action_source="investigation_tool",
+                        done=bool(result.done),
+                        fallback_reason=None,
+                        reward=float(result.reward or 0.0),
+                        step=step_num,
+                        task_id=task_id,
+                        ticket_id=ticket["ticket_id"],
+                    )
+                    if result.done:
+                        break
+                    ticket = obs.current_ticket
+                    if ticket is None:
+                        break
+
+                ticket_with_context = merge_ticket_context(ticket, obs)
                 action, action_source, fallback_reason = build_action(
-                    ticket,
+                    ticket_with_context,
                     obs.allowed_fields,
                     obs.instructions,
                 )
@@ -400,11 +533,12 @@ def run() -> None:
 
     overall = [
         float(all_results[task_id]["final_reward"])
-        for task_id in TASKS
+        for task_id in tasks_to_run
         if task_id in all_results
     ]
-    overall_avg = round(sum(overall) / len(overall), 4) if overall else 0.0
-    emit_log("END", overall_avg=overall_avg, tasks_completed=len(overall))
+    if not single_task_mode:
+        overall_avg = round(sum(overall) / len(overall), 4) if overall else 0.0
+        emit_log("END", overall_avg=overall_avg, tasks_completed=len(overall))
 
 
 if __name__ == "__main__":

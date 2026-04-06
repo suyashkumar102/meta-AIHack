@@ -101,6 +101,8 @@ class TestResetReturnsValidObservation(unittest.TestCase):
         self.assertIsNotNone(obs.current_ticket)
         self.assertGreater(obs.queue_size, 0)
         self.assertEqual(obs.tickets_processed, 0)
+        self.assertEqual(obs.queue_position, 1)
+        self.assertEqual(obs.tickets_after_current, max(0, obs.queue_size - 1))
 
 
 class TestResetAllTaskIds(unittest.TestCase):
@@ -116,6 +118,7 @@ class TestResetAllTaskIds(unittest.TestCase):
         self.assertEqual(obs.tickets_processed, 0)
         # allowed_fields must match the task definition
         self.assertEqual(obs.allowed_fields, TASKS[task_id]["allowed_fields"])
+        self.assertEqual(obs.queue_position, 1)
 
     def test_reset_task2(self) -> None:
         env = _make_env()
@@ -142,6 +145,10 @@ class TestStepAdvancesTicketsProcessed(unittest.TestCase):
         obs2 = env.step(action)
 
         self.assertEqual(obs2.tickets_processed, 1)
+        if obs2.done:
+            self.assertEqual(obs2.queue_position, 0)
+        else:
+            self.assertEqual(obs2.queue_position, 2)
 
     def test_step_reward_in_unit_interval(self) -> None:
         from models import HelpdeskTicketAction

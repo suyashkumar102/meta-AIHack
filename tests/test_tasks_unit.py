@@ -50,7 +50,7 @@ class TasksAndDatasetUnitTests(unittest.TestCase):
     def test_load_dataset_returns_valid_records(self) -> None:
         dataset = load_dataset()
 
-        self.assertEqual(len(dataset), 45)
+        self.assertGreaterEqual(len(dataset), 45)
         self.assertTrue(all(isinstance(record, HelpdeskTicketRecord) for record in dataset))
 
     def test_dataset_ticket_ids_are_unique(self) -> None:

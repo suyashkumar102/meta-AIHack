@@ -11,10 +11,39 @@
 ## How To Use This File
 
 - `PROJECT_STATUS.md` is the canonical log of completed work.
-- This roadmap is the remaining execution plan from the current repo state to final submission.
+- This roadmap is the active plan from the verified April 6, 2026 repo state to final submission.
 - `required.md` is now the combined official-requirements and project-compliance file.
 - `KNOWLEDGE.md` defines the current repo truth and judge-facing explanation.
 - `analysis/competition_notes.md` is the merged internal competitive note. Use it to prioritize work, but do not mention competitor repos in public-facing docs.
+- The dated April 3 to April 5 sections below are now historical context; the active execution block is the final 24-hour plan for April 6 to April 7, 2026.
+
+## Status As Of April 6, 2026
+
+The repo is now in the expected "stabilize and merge" phase rather than the earlier "build core fixes" phase.
+
+Completed and locally verified:
+
+- all concrete items from `gaps.md`
+- the viable low-risk improvements from `analysis/deep_competitive_gap_report.md`
+- single-task `inference.py` execution with `TASK_ID` support and optional `RUN_ALL_TASKS=1`
+- `state()` exposure of `reward` and `done`
+- richer history with predicted actions and follow-up context
+- lightweight investigate-versus-submit action support with tool-backed context lookup
+- small queue-economics signal without major benchmark redesign
+- `/web` UI route
+- local full test pass:
+  - `126 passed, 137 subtests passed`
+- local validator pass:
+  - `[OK] meta-AIHack: Ready for multi-mode deployment`
+
+Merge recommendation:
+
+- mergeable as an incremental submission-ready improvement branch
+- do not block merge on major redesign items that were explicitly out of scope:
+  - scenario-family task redesign
+  - breaking the issue-type-to-assignment shortcut
+  - large dataset expansion
+  - full queue simulator / economics redesign
 
 ## What We Are Optimizing For
 
@@ -47,13 +76,50 @@ The repo already has:
 - deterministic grading with limited partial credit
 - working heuristic baseline
 - merged local validation on `/health`, `/tasks`, and `inference.py`
-- current local benchmark reference:
-  - Task 1: `1.0000`
-  - Task 2: `0.8800`
-  - Task 3: `0.9400`
-  - Overall: `0.9400`
+- single-task evaluator-safe inference behavior
+- reward and done fields on `state()`
+- richer observation history and linked-ticket context
+- lightweight investigate / submit split with small built-in tool support
+- local full-suite verification:
+  - `126 passed, 137 subtests passed`
+- local validator verification:
+  - `[OK] meta-AIHack: Ready for multi-mode deployment`
 
 The remaining work should be treated as targeted strengthening, not broad feature invention.
+
+## Final 24-Hour Plan
+
+**Active window:** April 6 to April 7, 2026  
+**Internal target:** open PR, merge to the common `main`, and complete the final smoke checks by April 7, 2026  
+**Official deadline:** April 8, 2026, 11:59 PM IST
+
+### Must finish before merge
+
+- review the final diff and stage only the intended submission files
+- open the merge PR from a dedicated branch
+- merge into the shared `main` after one last reviewer pass
+- rerun the post-merge smoke checks:
+  - `pytest`
+  - `openenv validate`
+  - `/health`
+  - `/tasks`
+  - one `reset()` / `step()` sanity path
+
+### Do not add before merge
+
+- no new benchmark redesign work
+- no new dataset expansion
+- no schema churn
+- no reward refactors beyond blocker-level fixes
+- no last-minute inference prompt rewrites
+
+### Success condition for April 7, 2026
+
+- PR is up
+- PR is reviewed against `gaps.md` and `analysis/deep_competitive_gap_report.md`
+- shared `main` contains the tested gap-fix branch
+- deployment sanity checks are green
+- repo is frozen except for typo-level fixes
 
 ## Submission Gates That Must Still Hold
 

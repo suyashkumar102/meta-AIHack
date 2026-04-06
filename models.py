@@ -16,6 +16,8 @@ ISSUE_TYPE_SET = set(ISSUE_TYPES)
 PRIORITY_SET = set(PRIORITIES)
 ASSIGNMENT_GROUP_SET = set(ASSIGNMENT_GROUPS)
 RESOLUTION_ACTION_SET = set(RESOLUTION_ACTIONS)
+ACTION_TYPE_SET = {"submit", "investigate"}
+TOOL_NAME_SET = {"lookup_related_ticket", "lookup_requester_history"}
 
 
 def _validate_choice(value: str, allowed: set[str], field_name: str) -> str:
@@ -67,10 +69,23 @@ class HelpdeskTicketRecord(BaseModel):
 
 
 class HelpdeskTicketAction(Action):
+    action_type: str = "submit"
+    tool_name: Optional[str] = None
+    tool_target_ticket_id: Optional[str] = None
     issue_type: Optional[str] = None
     priority: Optional[str] = None
     assignment_group: Optional[str] = None
     resolution_action: Optional[str] = None
+
+    @field_validator("action_type")
+    @classmethod
+    def validate_action_type(cls, value: str) -> str:
+        return _validate_choice(value, ACTION_TYPE_SET, "action_type")
+
+    @field_validator("tool_name")
+    @classmethod
+    def validate_tool_name(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_optional_choice(value, TOOL_NAME_SET, "tool_name")
 
     @field_validator("issue_type")
     @classmethod
@@ -98,10 +113,15 @@ class HelpdeskTicketObservation(Observation):
     task_name: str = ""
     instructions: str = ""
     allowed_fields: list[str] = Field(default_factory=list)
-    current_ticket: Optional[dict[str, str]] = None
+    available_tools: list[str] = Field(default_factory=list)
+    investigation_budget_remaining: int = 0
+    last_tool_result: Optional[dict[str, Any]] = None
+    current_ticket: Optional[dict[str, Any]] = None
     queue_size: int = 0
     tickets_remaining: int = 0
+    tickets_after_current: int = 0
     tickets_processed: int = 0
+    queue_position: int = 0
     history: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -112,3 +132,11 @@ class HelpdeskTicketState(State):
     current_ticket_index: int = 0
     per_ticket_scores: list[float] = Field(default_factory=list)
     total_reward: float = 0.0
+    last_step_reward: Optional[float] = None
+    # `reward` is the field the evaluator checks on GET /state (mentor spec)
+    reward: Optional[float] = None
+    done: bool = False
+    investigation_steps: int = 0
+    investigation_budget_remaining: int = 0
+    last_tool_result: Optional[dict[str, Any]] = None
+    history_entries: list[dict] = Field(default_factory=list)

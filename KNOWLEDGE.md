@@ -24,7 +24,7 @@ IT helpdesk routing is a strong hackathon fit because it is:
 - deterministic to grade
 - naturally multi-step
 
-A helpdesk agent has to decide what the ticket is about, how urgent it is, who should own it, and what should happen next. That maps cleanly to a typed action object.
+A helpdesk agent has to decide what the ticket is about, how urgent it is, who should own it, and what should happen next. The current runtime now supports a small two-mode action object: investigate first when needed, then submit the final routing answer.
 
 ## The Repo In One Sentence
 
@@ -134,7 +134,7 @@ Important fields:
 
 ### `HelpdeskTicketAction`
 
-Represents the agent submission. Fields are optional because different tasks score different subsets.
+Represents the agent step. `action_type="submit"` carries routing fields, while `action_type="investigate"` uses a small built-in tool surface before the final submission.
 
 ### `HelpdeskTicketObservation`
 
@@ -142,6 +142,7 @@ Represents what the agent sees for each step:
 
 - task metadata
 - visible ticket fields
+- optional ambiguity or follow-up context
 - queue progress
 - score history
 
@@ -179,9 +180,18 @@ The observation exposes:
 
 - task metadata
 - the current ticket
+- available investigation tools
+- remaining free investigation budget
+- the latest tool result, when one was requested
 - queue progress counters
 - history
 - reward and done status
+
+Useful queue counters now include:
+
+- `tickets_remaining`: not-yet-processed tickets, including the current ticket when one is active
+- `tickets_after_current`: how many tickets remain after the current one
+- `queue_position`: 1-based position of the current ticket in the queue
 
 The state tracks:
 
@@ -191,12 +201,13 @@ The state tracks:
 - current ticket index
 - per-ticket scores
 - total reward
+- investigation step count
 
 ## Task Design
 
 ### Task 1: Issue Type Classification
 
-The agent predicts:
+The agent ultimately predicts:
 
 - `issue_type`
 
@@ -206,7 +217,7 @@ Purpose:
 
 ### Task 2: Issue Type And Priority
 
-The agent predicts:
+The agent ultimately predicts:
 
 - `issue_type`
 - `priority`
@@ -217,7 +228,7 @@ Purpose:
 
 ### Task 3: Full Ticket Routing
 
-The agent predicts:
+The agent ultimately predicts:
 
 - `issue_type`
 - `priority`
@@ -256,14 +267,14 @@ This is now proven in checked-in unit tests rather than left as a docs claim.
 
 Step reward:
 
-- current ticket score clamped to `[0.0, 1.0]`
+- current ticket score with a small milestone bonus for strong steps and a small penalty for very weak steps
 
 Final reward:
 
 - average of ticket scores
-- minus a small overshoot penalty for taking more steps than the queue length
+- minus a tiny penalty only if the agent exceeds the free investigation budget for the queue
 
-This gives dense feedback while still rewarding efficient episode completion.
+This keeps the reward dense and deterministic, removes the dead overshoot logic, and adds a small queue-level economics signal without disturbing the no-tool baseline path.
 
 ## Dataset Mental Model
 
@@ -276,6 +287,8 @@ Current structure:
 - medium cases where urgency matters
 - harder ambiguous cases
 - follow-up tickets connected through `related_ticket_id`
+
+When a follow-up link exists, the observation can now surface a lightweight `related_ticket_preview`, and the tool layer can fetch richer related-ticket or requester-history context so the agent does not have to route every ticket from isolated text alone.
 
 The dataset is meant to test routing judgment, not just keyword spotting.
 
@@ -299,16 +312,18 @@ It:
 
 1. connects to the environment
 2. loads the available tasks
-3. runs one episode per task
+3. runs one episode for the requested task
 4. picks an action for each ticket
 5. sends the action back through the client
 6. records rewards
-7. prints a task-by-task summary
+7. prints structured logs for that run
 
 It supports:
 
 - heuristic mode with no external model
 - LLM mode through an OpenAI-compatible API
+- lightweight investigation-tool calls before the final submit action
+- an explicit local `RUN_ALL_TASKS=1` override when you want the old multi-task sweep
 
 ## Files That Matter Most
 

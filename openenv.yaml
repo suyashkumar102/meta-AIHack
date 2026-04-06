@@ -7,6 +7,9 @@ author: Hackstreet Boys - Roopal Guha Neogi, Suyash Kumar
 
 environment:
   type: openenv
+  # entry_point identifies the Environment class for the OpenEnv validator.
+  # The HTTP server entrypoint for deployment is defined separately in
+  # pyproject.toml under [project.scripts] as: server = "server.app:main"
   entry_point: server.environment:HelpdeskTicketRoutingEnvironment
   action_model: models:HelpdeskTicketAction
   observation_model: models:HelpdeskTicketObservation
@@ -50,6 +53,7 @@ inference:
     - MODEL_NAME
     - HF_TOKEN
     - ENV_URL
+    - TASK_ID
 
 requirements:
   python: ">=3.11"

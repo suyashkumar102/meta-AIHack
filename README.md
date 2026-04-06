@@ -34,7 +34,7 @@ The environment models a realistic helpdesk workflow:
 
 1. a new ticket enters the queue
 2. the agent reads the ticket title and description
-3. the agent predicts structured routing fields
+3. the agent may investigate with lightweight tools, then submit structured routing fields
 4. the grader assigns deterministic credit
 5. the environment advances to the next ticket until the queue is complete
 
@@ -43,7 +43,7 @@ This domain is useful for OpenEnv because it is operationally realistic, easy to
 ## Why This Is A Good Hackathon Domain
 
 - it reflects real enterprise support operations
-- the action space is structured and judge-friendly
+- the action space is structured and judge-friendly, with a small investigate-versus-submit split
 - correctness can be scored deterministically
 - the hard task is meaningfully harder than the easy and medium tasks
 - the environment is small enough to rerun quickly
@@ -55,7 +55,7 @@ The project uses a queue-based episode model.
 - `reset()` samples a task and a queue of 3 to 5 tickets
 - `step()` grades one ticket submission at a time
 - `state()` exposes the internal episode snapshot
-- final reward is based on average ticket quality with a small overshoot penalty
+- final reward is based on average ticket quality across the queue
 
 The environment classes and vocabulary are intentionally frozen to keep collaboration and judging simple.
 
@@ -115,6 +115,9 @@ Visible ticket fields:
 - `title`
 - `requester`
 - `description`
+- optional `ambiguity_note`
+- optional `related_ticket_id`
+- optional `related_ticket_preview`
 
 Each observation also includes:
 
@@ -122,9 +125,14 @@ Each observation also includes:
 - `task_name`
 - `instructions`
 - `allowed_fields`
+- `available_tools`
+- `investigation_budget_remaining`
+- `last_tool_result`
 - `queue_size`
 - `tickets_remaining`
+- `tickets_after_current`
 - `tickets_processed`
+- `queue_position`
 - `history`
 - standard OpenEnv fields such as `done` and `reward`
 
@@ -138,10 +146,22 @@ The internal `HelpdeskTicketState` tracks:
 - `current_ticket_index`
 - `per_ticket_scores`
 - `total_reward`
+- `reward`
+- `done`
 
 ## Grading And Reward
 
 Scoring is deterministic and normalized to `[0.0, 1.0]`.
+
+The action model now supports two paths:
+
+- `action_type="submit"` for the final routing answer
+- `action_type="investigate"` with a small built-in tool surface before submission
+
+Available tools:
+
+- `lookup_related_ticket`
+- `lookup_requester_history`
 
 Per-field behavior:
 
@@ -161,10 +181,14 @@ Task weights:
 Final episode reward:
 
 ```text
-average(per_ticket_scores) - 0.03 * max(0, steps_taken - queue_size)
+average(per_ticket_scores)
 ```
 
 The result is clamped to `[0.0, 1.0]`.
+
+Step reward is lightly milestone-shaped: high per-ticket scores get a small bonus and very low scores get a small penalty before the final clamp.
+
+Final reward also includes a tiny queue-economics penalty only when the agent exceeds the free investigation budget. One investigation per queued ticket is free; extra investigation steps reduce the final reward slightly.
 
 ## Grounded Scoring
 
@@ -285,7 +309,7 @@ curl http://localhost:7860/tasks
 
 ## Running The Baseline Inference Script
 
-The baseline script supports two modes.
+The baseline script supports single-task evaluator mode by default, plus an explicit local batch override.
 
 ### Heuristic mode
 
@@ -293,6 +317,12 @@ If no LLM credentials are set, it uses a keyword-based ticket router:
 
 ```bash
 python inference.py
+```
+
+By default that runs exactly one task and emits exactly one `[START] ... [END]` block. To target a specific task:
+
+```bash
+TASK_ID=3 python inference.py
 ```
 
 ### LLM mode
@@ -313,6 +343,14 @@ Optional target:
 
 - `ENV_URL`
 - default value: `http://localhost:7860`
+- `TASK_ID`
+- `RUN_ALL_TASKS`
+
+To reproduce the multi-task local benchmark sweep:
+
+```bash
+RUN_ALL_TASKS=1 python inference.py
+```
 
 ## Runtime Validation Snapshot
 
@@ -324,7 +362,7 @@ Validated locally:
 - `/health`
 - `/tasks`
 - `/reset`
-- heuristic `inference.py` run across all 3 tasks
+- heuristic `inference.py` run across all 3 tasks with `RUN_ALL_TASKS=1`
 
 Current local heuristic results:
 
@@ -358,7 +396,7 @@ docker run -p 7860:7860 helpdesk-ticket-routing
 Then run inference against it (default `ENV_URL` points to `http://localhost:7860`):
 
 ```bash
-python inference.py
+RUN_ALL_TASKS=1 python inference.py
 ```
 
 If you publish the container on a different host port, set `ENV_URL` accordingly before running `inference.py`.
@@ -376,6 +414,7 @@ OpenEnv provides the core environment endpoints, and the repo adds a custom task
 | POST | `/step` | submit an action |
 | GET | `/state` | inspect internal state |
 | GET | `/tasks` | list task metadata |
+| GET | `/web` | lightweight HF Space UI |
 | GET | `/docs` | interactive API docs |
 
 ## Submission Readiness

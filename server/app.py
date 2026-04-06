@@ -6,6 +6,7 @@ _repo_root = str(Path(__file__).resolve().parent.parent)
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
+from fastapi.responses import HTMLResponse
 from openenv.core.env_server import create_app
 
 from models import HelpdeskTicketAction, HelpdeskTicketObservation
@@ -35,6 +36,25 @@ def list_tasks():
             for t in TASKS.values()
         ]
     }
+
+
+@app.get("/web", response_class=HTMLResponse)
+def web_ui():
+    task_rows = "".join(
+        f"<tr><td>{t['id']}</td><td>{t['name']}</td><td>{t['difficulty']}</td></tr>"
+        for t in TASKS.values()
+    )
+    html = f"""<!DOCTYPE html>
+<html><head><title>{APP_ENV_NAME}</title></head>
+<body>
+<h1>{APP_ENV_NAME}</h1>
+<p>Version: 0.1.0 | <a href="/health">Health</a> | <a href="/docs">API Docs</a></p>
+<h2>Tasks</h2>
+<table border="1"><tr><th>ID</th><th>Name</th><th>Difficulty</th></tr>
+{task_rows}
+</table>
+</body></html>"""
+    return HTMLResponse(content=html)
 
 
 def main() -> None:

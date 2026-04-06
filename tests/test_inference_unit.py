@@ -163,6 +163,22 @@ class InferenceUnitTests(unittest.TestCase):
             )
         )
 
+    def test_default_task_selection_runs_single_first_task(self) -> None:
+        inference = _load_inference_module()
+
+        self.assertEqual(
+            inference.get_tasks_to_run({1: {}, 2: {}, 3: {}}),
+            [1],
+        )
+
+    def test_run_all_tasks_override_keeps_local_batch_mode_available(self) -> None:
+        inference = _load_inference_module({"RUN_ALL_TASKS": "1"})
+
+        self.assertEqual(
+            inference.get_tasks_to_run({1: {}, 2: {}, 3: {}}),
+            [1, 2, 3],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
