@@ -167,6 +167,9 @@ class TestResetEndpoint(unittest.TestCase):
     def test_reset_reward_is_null(self):
         self.assertIsNone(self.data["reward"])
 
+    def test_reset_rubric_reward_is_null(self):
+        self.assertIsNone(self.data["rubric_reward"])
+
     def test_reset_task_id_is_1(self):
         self.assertEqual(self.data["task_id"], 1)
 
@@ -176,6 +179,13 @@ class TestResetEndpoint(unittest.TestCase):
     def test_reset_allowed_fields_non_empty(self):
         self.assertIsInstance(self.data["allowed_fields"], list)
         self.assertGreater(len(self.data["allowed_fields"]), 0)
+
+    def test_reset_available_action_types_exposed(self):
+        self.assertEqual(self.data["available_action_types"], ["submit", "investigate"])
+
+    def test_reset_progress_metrics_start_at_zero(self):
+        self.assertEqual(self.data["average_score_so_far"], 0.0)
+        self.assertEqual(self.data["progress_fraction"], 0.0)
 
 
 class TestStepEndpoint(unittest.TestCase):
@@ -199,6 +209,35 @@ class TestStepEndpoint(unittest.TestCase):
 
     def test_step_tickets_processed_is_1(self):
         self.assertEqual(self.data["tickets_processed"], 1)
+
+    def test_step_metadata_exposes_last_feedback_summary(self):
+        metadata = self.data.get("metadata", {})
+        self.assertIn("last_feedback_summary", metadata)
+        self.assertIsInstance(metadata["last_feedback_summary"], str)
+        self.assertTrue(metadata["last_feedback_summary"])
+
+    def test_step_history_entry_includes_feedback_summary(self):
+        history = self.data.get("history", [])
+        self.assertGreater(len(history), 0)
+        self.assertIn("feedback_summary", history[-1])
+        self.assertIsInstance(history[-1]["feedback_summary"], str)
+        self.assertTrue(history[-1]["feedback_summary"])
+
+    def test_step_exposes_structured_reward_components(self):
+        self.assertIn("last_reward_components", self.data)
+        self.assertIsInstance(self.data["last_reward_components"], dict)
+        self.assertIn("ticket_score", self.data["last_reward_components"])
+        self.assertIn("final_reward", self.data["last_reward_components"])
+        self.assertEqual(
+            self.data["metadata"].get("last_reward_components"),
+            self.data["last_reward_components"],
+        )
+
+    def test_step_progress_metrics_are_exposed(self):
+        self.assertIn("average_score_so_far", self.data)
+        self.assertIn("progress_fraction", self.data)
+        self.assertGreaterEqual(self.data["progress_fraction"], 0.0)
+        self.assertLessEqual(self.data["progress_fraction"], 1.0)
 
 
 class TestStateEndpoint(unittest.TestCase):
@@ -277,6 +316,38 @@ class TestFullSeededEpisode(unittest.TestCase):
         self.assertIsNotNone(final_reward, "Episode did not complete within max_steps")
         self.assertGreaterEqual(final_reward, 0.0)
         self.assertLessEqual(final_reward, 1.0)
+
+    def test_full_episode_terminal_rubric_reward_in_unit_interval(self):
+        reset_resp = _reset(task_id=1, seed=42)
+        self.assertEqual(reset_resp.status_code, 200)
+        obs = reset_resp.json()
+
+        allowed_fields = obs["allowed_fields"]
+        final_rubric_reward = None
+        for _ in range(20):
+            action_payload: dict = {}
+            if "issue_type" in allowed_fields:
+                action_payload["issue_type"] = "general_inquiry"
+            if "priority" in allowed_fields:
+                action_payload["priority"] = "medium"
+            if "assignment_group" in allowed_fields:
+                action_payload["assignment_group"] = "service_desk"
+            if "resolution_action" in allowed_fields:
+                action_payload["resolution_action"] = "acknowledge"
+
+            step_resp = client.post("/step", json=action_payload)
+            self.assertEqual(step_resp.status_code, 200)
+            obs = step_resp.json()
+
+            if obs["done"]:
+                final_rubric_reward = obs.get("rubric_reward")
+                break
+
+        self.assertIsNotNone(
+            final_rubric_reward, "Terminal observation did not include rubric_reward"
+        )
+        self.assertGreaterEqual(final_rubric_reward, 0.0)
+        self.assertLessEqual(final_rubric_reward, 1.0)
 
     def test_full_episode_all_tasks_complete(self):
         """4.1.1 — Full seeded episode completes for each task ID (1, 2, 3)."""

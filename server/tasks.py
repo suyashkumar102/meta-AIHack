@@ -37,7 +37,9 @@ TASKS = {
             "Perform full helpdesk routing by selecting the best issue type, "
             "priority, assignment group, and resolution action for the ticket. "
             "Use any ambiguity notes or related-ticket previews when present. "
-            "You may investigate with tools before you submit the final action."
+            "Some hard tickets intentionally hide decisive routing context until "
+            "you investigate with the available tools, so premature submission can "
+            "underperform even when the visible text looks plausible."
         ),
         "allowed_fields": [
             "issue_type",

@@ -18,6 +18,7 @@ ASSIGNMENT_GROUP_SET = set(ASSIGNMENT_GROUPS)
 RESOLUTION_ACTION_SET = set(RESOLUTION_ACTIONS)
 ACTION_TYPE_SET = {"submit", "investigate"}
 TOOL_NAME_SET = {"lookup_related_ticket", "lookup_requester_history"}
+TOOL_NAME_SET.add("lookup_internal_routing_note")
 
 
 def _validate_choice(value: str, allowed: set[str], field_name: str) -> str:
@@ -113,6 +114,7 @@ class HelpdeskTicketObservation(Observation):
     task_name: str = ""
     instructions: str = ""
     allowed_fields: list[str] = Field(default_factory=list)
+    available_action_types: list[str] = Field(default_factory=list)
     available_tools: list[str] = Field(default_factory=list)
     investigation_budget_remaining: int = 0
     last_tool_result: Optional[dict[str, Any]] = None
@@ -122,7 +124,11 @@ class HelpdeskTicketObservation(Observation):
     tickets_after_current: int = 0
     tickets_processed: int = 0
     queue_position: int = 0
+    average_score_so_far: float = 0.0
+    progress_fraction: float = 0.0
     history: list[dict[str, Any]] = Field(default_factory=list)
+    last_reward_components: dict[str, Any] = Field(default_factory=dict)
+    rubric_reward: Optional[float] = None
 
 
 class HelpdeskTicketState(State):
@@ -136,7 +142,11 @@ class HelpdeskTicketState(State):
     # `reward` is the field the evaluator checks on GET /state (mentor spec)
     reward: Optional[float] = None
     done: bool = False
+    average_score_so_far: float = 0.0
     investigation_steps: int = 0
     investigation_budget_remaining: int = 0
+    investigation_penalty_applied: float = 0.0
     last_tool_result: Optional[dict[str, Any]] = None
+    last_reward_components: dict[str, Any] = Field(default_factory=dict)
+    ticket_tool_usage: dict[str, list[str]] = Field(default_factory=dict)
     history_entries: list[dict] = Field(default_factory=list)

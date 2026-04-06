@@ -66,13 +66,27 @@ from vocabulary import (
 DEFAULT_API_BASE_URL = "https://router.huggingface.co/v1"
 DEFAULT_MODEL_NAME = "<your-active-model>"
 
+
+def _get_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        print(
+            f"[WARN] {name}={raw_value!r} is not a valid integer; using {default}.",
+            flush=True,
+        )
+        return default
+
 API_BASE_URL = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
 MODEL_NAME = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 HF_TOKEN = os.getenv("HF_TOKEN")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 
-SEED = 42
+SEED = _get_int_env("SEED", 42)
 TASK_ID_ENV = os.getenv("TASK_ID")
 RUN_ALL_TASKS_ENV = os.getenv("RUN_ALL_TASKS", "").strip().lower() in {
     "1",
@@ -94,6 +108,14 @@ if llm_mode_enabled():
     llm_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 
+RECENT_HISTORY_LIMIT = 2
+ROUTING_PRIORS = "\n".join(
+    f"- {issue_type}: assignment_group={ISSUE_TYPE_TO_ASSIGNMENT_GROUP[issue_type]}, "
+    f"resolution_action={ISSUE_TYPE_TO_RESOLUTION_ACTION[issue_type]}"
+    for issue_type in ISSUE_TYPES
+)
+
+
 SYSTEM_PROMPT = """\
 You are an expert IT helpdesk ticket routing agent. Given a helpdesk ticket, you must produce a JSON object with the requested fields.
 
@@ -103,19 +125,79 @@ Valid values:
 - assignment_group: {assignment_groups}
 - resolution_action: {resolution_actions}
 
+Decision rules:
+- Follow this environment's label ontology exactly; do not invent categories.
+- Prefer the primary operational workflow label over a secondary technical symptom.
+- Keep assignment_group and resolution_action consistent with the chosen issue_type unless the ticket explicitly justifies a different choice.
+- Use investigation results and recent evaluation feedback when provided.
+
+Domain conventions:
+- Enterprise pricing, quotes, plan comparisons, and commercial procurement requests map to service_request, usually with medium priority.
+- Onboarding work that is blocked by an access problem still maps to onboarding when the primary workflow is onboarding; the assignment_group may still be service_desk if the ticket says onboarding cannot resolve the access issue.
+- Single-user sign-in, login, MFA, or 2FA lockouts map to identity_access and are usually high priority, not critical.
+- Reserve critical priority for outages, widespread business blockers, or explicit urgent critical incidents.
+
+Routing priors:
+{routing_priors}
+
 Return ONLY valid JSON with the requested fields. No markdown, no explanation.""".format(
     issue_types=", ".join(ISSUE_TYPES),
     priorities=", ".join(PRIORITIES),
     assignment_groups=", ".join(ASSIGNMENT_GROUPS),
     resolution_actions=", ".join(RESOLUTION_ACTIONS),
+    routing_priors=ROUTING_PRIORS,
 )
 
 
-def call_llm(ticket: dict, allowed_fields: list[str], instructions: str) -> dict:
-    assert llm_client is not None, "LLM client not configured"
+def format_recent_history_entries(
+    history: list[dict[str, Any]], limit: int = RECENT_HISTORY_LIMIT
+) -> str:
+    if not history:
+        return ""
+
+    lines = ["Recent evaluation feedback (latest last):"]
+    for entry in history[-limit:]:
+        predicted = json.dumps(entry.get("predicted", {}), sort_keys=True)
+        line = (
+            f"- Ticket {entry.get('ticket_id', '?')}: predicted={predicted}, "
+            f"score={entry.get('score', 0.0)}"
+        )
+        feedback_summary = entry.get("feedback_summary")
+        if feedback_summary:
+            line += f", feedback={feedback_summary}"
+        reward = entry.get("reward")
+        if reward is not None:
+            line += f", reward={reward}"
+        rubric_reward = entry.get("rubric_reward")
+        if rubric_reward is not None:
+            line += f", rubric_reward={rubric_reward}"
+        breakdown = entry.get("breakdown") or {}
+        if breakdown:
+            line += f", breakdown={json.dumps(breakdown, sort_keys=True)}"
+        penalty_reason = entry.get("penalty_reason")
+        if penalty_reason:
+            line += f", penalty_reason={penalty_reason}"
+        tool_result = entry.get("tool_result")
+        if tool_result is not None:
+            line += f", tool_result={json.dumps(tool_result, sort_keys=True)}"
+        reward_components = entry.get("reward_components")
+        if reward_components:
+            line += f", reward_components={json.dumps(reward_components, sort_keys=True)}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def build_llm_user_message(ticket: dict, allowed_fields: list[str], instructions: str) -> str:
     ambiguity_note = ticket.get("ambiguity_note")
     related_preview = ticket.get("related_ticket_preview") or {}
     last_tool_result = ticket.get("last_tool_result")
+    context_status = ticket.get("context_status") or {}
+    recent_history = ticket.get("recent_history") or []
+    feedback_summary = ticket.get("feedback_summary")
+    last_reward_components = ticket.get("last_reward_components") or {}
+    investigation_budget_remaining = ticket.get("investigation_budget_remaining")
+    average_score_so_far = ticket.get("average_score_so_far")
+    progress_fraction = ticket.get("progress_fraction")
     extra_context_lines: list[str] = []
     if ambiguity_note:
         extra_context_lines.append(f"Ambiguity note: {ambiguity_note}")
@@ -132,19 +214,52 @@ def call_llm(ticket: dict, allowed_fields: list[str], instructions: str) -> dict
         extra_context_lines.append(
             "Investigation result: " + json.dumps(last_tool_result, sort_keys=True)
         )
+    if context_status:
+        extra_context_lines.append(
+            "Context status: " + json.dumps(context_status, sort_keys=True)
+        )
+    if feedback_summary:
+        extra_context_lines.append(f"Latest environment feedback: {feedback_summary}")
+    if last_reward_components:
+        extra_context_lines.append(
+            "Latest reward components: "
+            + json.dumps(last_reward_components, sort_keys=True)
+        )
+    recent_history_block = format_recent_history_entries(recent_history)
+    if recent_history_block:
+        extra_context_lines.append(recent_history_block)
+    queue_position = ticket.get("queue_position")
+    tickets_remaining = ticket.get("tickets_remaining")
+    if queue_position is not None and tickets_remaining is not None:
+        extra_context_lines.append(
+            f"Queue context: queue_position={queue_position}, tickets_remaining={tickets_remaining}"
+        )
+    if average_score_so_far is not None:
+        extra_context_lines.append(f"Average score so far: {average_score_so_far}")
+    if progress_fraction is not None:
+        extra_context_lines.append(f"Episode progress: {progress_fraction}")
+    if investigation_budget_remaining is not None:
+        extra_context_lines.append(
+            f"Investigation budget remaining: {investigation_budget_remaining}"
+        )
     extra_context_block = ""
     if extra_context_lines:
         extra_context_block = "\n" + "\n".join(extra_context_lines)
 
-    user_msg = (
+    return (
         f"Instructions: {instructions}\n\n"
         f"Allowed fields: {', '.join(allowed_fields)}\n\n"
-        f"Title: {ticket['title']}\n"
-        f"Requester: {ticket['requester']}\n"
-        f"Description: {ticket['description']}"
+        f"Title: {ticket.get('title', '')}\n"
+        f"Requester: {ticket.get('requester', '')}\n"
+        f"Description: {ticket.get('description', '')}"
         f"{extra_context_block}\n\n"
         f"Respond with JSON containing ONLY these fields: {', '.join(allowed_fields)}"
     )
+
+
+def call_llm(ticket: dict, allowed_fields: list[str], instructions: str) -> dict:
+    assert llm_client is not None, "LLM client not configured"
+    user_msg = build_llm_user_message(ticket, allowed_fields, instructions)
 
     response = llm_client.chat.completions.create(
         model=MODEL_NAME,
@@ -298,6 +413,95 @@ FULFILL_KEYWORDS = (
     "mfa enabled",
 )
 
+PRICING_REQUEST_KEYWORDS = (
+    "pricing breakdown",
+    "enterprise tier pricing",
+    "enterprise plan",
+    "compare your enterprise plan",
+    "comparing your enterprise plan",
+    "quote",
+    "pricing quote",
+    "commercial proposal",
+    "vendor comparison",
+)
+
+ONBOARDING_WORKFLOW_KEYWORDS = (
+    "onboarding",
+    "new hire",
+    "contractor",
+    "provisioned",
+    "kickoff onboarding",
+)
+
+ACCESS_BLOCKER_KEYWORDS = (
+    "access issue",
+    "permissions error",
+    "permission error",
+    "account access is blocked",
+    "cannot sign in",
+    "can't sign in",
+    "locked",
+    "2fa",
+    "mfa",
+)
+
+SERVICE_DESK_ONBOARDING_ESCALATION_KEYWORDS = (
+    "onboarding team cannot resolve access issues",
+    "routing to service desk",
+    "route to service desk",
+    "service desk",
+)
+
+CRITICAL_INCIDENT_KEYWORDS = (
+    "outage",
+    "company-wide",
+    "all users",
+    "widespread",
+    "production down",
+    "critical incident",
+    "sev1",
+)
+
+HIGH_PRIORITY_SIGNAL_KEYWORDS = (
+    "locked",
+    "blocked",
+    "cannot sign in",
+    "can't sign in",
+    "2fa",
+    "mfa",
+    "expedite",
+    "start monday",
+    "asap",
+    "today",
+    "eod",
+    "urgent",
+)
+
+TIME_SENSITIVE_PRIORITY_KEYWORDS = (
+    "expedite",
+    "start monday",
+    "today",
+    "asap",
+    "eod",
+    "urgent",
+    "immediately",
+)
+
+
+def build_routing_text(ticket: dict) -> str:
+    related_preview = ticket.get("related_ticket_preview") or {}
+    last_tool_result = ticket.get("last_tool_result") or {}
+    return " ".join(
+        [
+            ticket.get("title", ""),
+            ticket.get("description", ""),
+            ticket.get("ambiguity_note", ""),
+            related_preview.get("title", ""),
+            related_preview.get("description", ""),
+            json.dumps(last_tool_result, sort_keys=True),
+        ]
+    ).lower()
+
 
 def heuristic_priority(text: str) -> str:
     if any(word in text for word in CRITICAL_PRIORITY_KEYWORDS):
@@ -323,26 +527,32 @@ def heuristic_resolution_action(text: str, issue_type: str) -> str:
     return ISSUE_TYPE_TO_RESOLUTION_ACTION.get(issue_type, "acknowledge")
 
 
-def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
-    related_preview = ticket.get("related_ticket_preview") or {}
-    last_tool_result = ticket.get("last_tool_result") or {}
-    text = " ".join(
-        [
-            ticket.get("title", ""),
-            ticket.get("description", ""),
-            ticket.get("ambiguity_note", ""),
-            related_preview.get("title", ""),
-            related_preview.get("description", ""),
-            json.dumps(last_tool_result, sort_keys=True),
-        ]
-    ).lower()
+def heuristic_assignment_group(text: str, issue_type: str) -> str:
+    if issue_type == "onboarding":
+        if any(keyword in text for keyword in SERVICE_DESK_ONBOARDING_ESCALATION_KEYWORDS):
+            return "service_desk"
+        if any(keyword in text for keyword in ACCESS_BLOCKER_KEYWORDS) and any(
+            keyword in text for keyword in ONBOARDING_WORKFLOW_KEYWORDS
+        ):
+            return "service_desk"
+    return ISSUE_TYPE_TO_ASSIGNMENT_GROUP.get(issue_type, "service_desk")
 
+
+def infer_issue_type(text: str) -> str:
     issue_type = "general_inquiry"
     for kw, mapped_issue_type in KEYWORD_ISSUE_TYPES.items():
         if kw in text:
             issue_type = mapped_issue_type
             break
+    return issue_type
 
+
+def heuristic_action(
+    ticket: dict, allowed_fields: list[str], issue_type_override: str | None = None
+) -> dict:
+    text = build_routing_text(ticket)
+
+    issue_type = issue_type_override or infer_issue_type(text)
     priority = heuristic_priority(text)
     resolution_action = heuristic_resolution_action(text, issue_type)
 
@@ -352,12 +562,73 @@ def heuristic_action(ticket: dict, allowed_fields: list[str]) -> dict:
     if "priority" in allowed_fields:
         result["priority"] = priority
     if "assignment_group" in allowed_fields:
-        result["assignment_group"] = ISSUE_TYPE_TO_ASSIGNMENT_GROUP.get(
-            issue_type, "service_desk"
-        )
+        result["assignment_group"] = heuristic_assignment_group(text, issue_type)
     if "resolution_action" in allowed_fields:
         result["resolution_action"] = resolution_action
     return result
+
+
+def apply_domain_overrides(
+    ticket: dict, candidate: dict[str, Any], allowed_fields: list[str]
+) -> tuple[dict[str, Any], list[str]]:
+    updated = dict(candidate)
+    reasons: list[str] = []
+    text = build_routing_text(ticket)
+
+    issue_type = updated.get("issue_type")
+    if "issue_type" in allowed_fields and issue_type is not None:
+        if (
+            issue_type in {"billing_license", "general_inquiry"}
+            and any(keyword in text for keyword in PRICING_REQUEST_KEYWORDS)
+        ):
+            updated["issue_type"] = "service_request"
+            issue_type = "service_request"
+            reasons.append("override_issue_type=service_request(pricing_request)")
+        elif (
+            issue_type == "identity_access"
+            and any(keyword in text for keyword in ONBOARDING_WORKFLOW_KEYWORDS)
+            and any(keyword in text for keyword in ACCESS_BLOCKER_KEYWORDS)
+        ):
+            updated["issue_type"] = "onboarding"
+            issue_type = "onboarding"
+            reasons.append("override_issue_type=onboarding(onboarding_access_blocker)")
+
+    if issue_type is not None:
+        if "assignment_group" in allowed_fields:
+            desired_group = heuristic_assignment_group(text, issue_type)
+            if updated.get("assignment_group") != desired_group:
+                updated["assignment_group"] = desired_group
+                reasons.append(f"override_assignment_group={desired_group}")
+        if "resolution_action" in allowed_fields:
+            desired_resolution = heuristic_resolution_action(text, issue_type)
+            if updated.get("resolution_action") != desired_resolution:
+                updated["resolution_action"] = desired_resolution
+                reasons.append(f"override_resolution_action={desired_resolution}")
+
+    if "priority" in allowed_fields and updated.get("priority") is not None:
+        priority = updated["priority"]
+        has_critical_signal = any(keyword in text for keyword in CRITICAL_INCIDENT_KEYWORDS)
+        has_high_signal = any(keyword in text for keyword in HIGH_PRIORITY_SIGNAL_KEYWORDS)
+        if priority == "critical" and not has_critical_signal:
+            updated["priority"] = "high" if has_high_signal else "medium"
+            reasons.append(f"override_priority={updated['priority']}(deescalated_from_critical)")
+        elif (
+            priority == "high"
+            and issue_type in {"service_request", "onboarding"}
+            and not any(keyword in text for keyword in TIME_SENSITIVE_PRIORITY_KEYWORDS)
+        ):
+            updated["priority"] = "medium"
+            reasons.append("override_priority=medium(nonurgent_workflow_request)")
+        elif (
+            priority == "medium"
+            and issue_type == "identity_access"
+            and any(keyword in text for keyword in ("cannot sign in", "can't sign in", "2fa", "mfa", "locked"))
+            and not has_critical_signal
+        ):
+            updated["priority"] = "high"
+            reasons.append("override_priority=high(identity_lockout)")
+
+    return updated, reasons
 
 
 def build_action(
@@ -370,13 +641,50 @@ def build_action(
 
     try:
         llm_dict = call_llm(ticket, allowed_fields, instructions)
-        candidate = {
-            field: llm_dict[field]
-            for field in allowed_fields
-            if llm_dict.get(field) is not None
-        }
-        if not candidate:
+        validated_llm_fields: dict[str, Any] = {}
+        rejected_fields: list[str] = []
+        for field in allowed_fields:
+            value = llm_dict.get(field)
+            if value is None:
+                continue
+            try:
+                HelpdeskTicketAction(**{field: value})
+            except Exception:
+                rejected_fields.append(field)
+                continue
+            validated_llm_fields[field] = value
+
+        if not validated_llm_fields:
             raise ValueError("LLM returned no allowed fields")
+
+        candidate = heuristic_action(
+            ticket,
+            allowed_fields,
+            issue_type_override=validated_llm_fields.get("issue_type"),
+        )
+        candidate.update(validated_llm_fields)
+        accepted_fields = list(validated_llm_fields)
+        candidate, override_reasons = apply_domain_overrides(
+            ticket,
+            candidate,
+            allowed_fields,
+        )
+
+        backfilled_fields = [field for field in allowed_fields if field not in accepted_fields]
+        if backfilled_fields or rejected_fields or override_reasons:
+            reason_parts = []
+            if backfilled_fields:
+                reason_parts.append(f"heuristic_backfill={backfilled_fields}")
+            if rejected_fields:
+                reason_parts.append(f"invalid_llm_fields={rejected_fields}")
+            if override_reasons:
+                reason_parts.append(f"domain_overrides={override_reasons}")
+            return (
+                HelpdeskTicketAction(**candidate),
+                "llm_backfilled",
+                "; ".join(reason_parts),
+            )
+
         return HelpdeskTicketAction(**candidate), "llm", None
     except Exception as exc:
         return (
@@ -389,6 +697,10 @@ def build_action(
 def should_investigate(ticket: dict, history: list[dict[str, Any]]) -> tuple[bool, str | None]:
     if not ticket:
         return False, None
+    context_status = ticket.get("context_status") or {}
+    remaining_tools = context_status.get("remaining_tools") or []
+    if remaining_tools:
+        return True, str(remaining_tools[0])
     current_ticket_id = ticket.get("ticket_id")
     already_investigated = any(
         entry.get("ticket_id") == current_ticket_id
@@ -408,6 +720,22 @@ def merge_ticket_context(ticket: dict, observation: Any) -> dict:
     merged_ticket = dict(ticket)
     if getattr(observation, "last_tool_result", None) is not None:
         merged_ticket["last_tool_result"] = observation.last_tool_result
+    merged_ticket["recent_history"] = list(getattr(observation, "history", []))
+    merged_ticket["queue_position"] = getattr(observation, "queue_position", None)
+    merged_ticket["tickets_remaining"] = getattr(observation, "tickets_remaining", None)
+    merged_ticket["investigation_budget_remaining"] = getattr(
+        observation,
+        "investigation_budget_remaining",
+        None,
+    )
+    merged_ticket["average_score_so_far"] = getattr(observation, "average_score_so_far", None)
+    merged_ticket["progress_fraction"] = getattr(observation, "progress_fraction", None)
+    merged_ticket["last_reward_components"] = dict(
+        getattr(observation, "last_reward_components", {}) or {}
+    )
+    observation_metadata = getattr(observation, "metadata", {}) or {}
+    if observation_metadata.get("last_feedback_summary"):
+        merged_ticket["feedback_summary"] = observation_metadata["last_feedback_summary"]
     return merged_ticket
 
 
@@ -518,7 +846,12 @@ def run() -> None:
                     ticket_id=ticket["ticket_id"],
                 )
 
-        final_reward = task_step_rewards[-1] if task_step_rewards else 0.0
+        final_rubric_reward = getattr(obs, "rubric_reward", None)
+        final_reward = (
+            float(final_rubric_reward)
+            if final_rubric_reward is not None
+            else (task_step_rewards[-1] if task_step_rewards else 0.0)
+        )
         all_results[task_id] = {
             "final_reward": final_reward,
             "step_count": step_num,

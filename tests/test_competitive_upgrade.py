@@ -182,6 +182,16 @@ class TestStateHasRewardAndDone(unittest.TestCase):
             obs = env.step(_heuristic_action(obs))
             self.assertFalse(env.state.done)
 
+    def test_state_tracks_average_score_and_reward_components(self) -> None:
+        env = _make_env()
+        obs = env.reset(seed=42, task_id=1)
+        env.step(_heuristic_action(obs))
+        state = env.state
+        self.assertGreaterEqual(state.average_score_so_far, 0.0)
+        self.assertLessEqual(state.average_score_so_far, 1.0)
+        self.assertIsInstance(state.last_reward_components, dict)
+        self.assertIn("final_reward", state.last_reward_components)
+
 
 # ---------------------------------------------------------------------------
 # 9.3 — History entry contains title and predicted
@@ -318,7 +328,7 @@ class TestAmbiguityNoteInObservation(unittest.TestCase):
                 return seed
         return None
 
-    def test_ambiguity_note_present_when_ticket_has_one(self) -> None:
+    def test_ambiguity_note_hidden_until_internal_note_lookup(self) -> None:
         """Force a ticket with ambiguity_note by patching the dataset."""
         from unittest.mock import patch
         from server.tasks import load_dataset
@@ -336,8 +346,22 @@ class TestAmbiguityNoteInObservation(unittest.TestCase):
             obs = env.reset(seed=0, task_id=3)
 
         self.assertIsNotNone(obs.current_ticket)
-        self.assertIn("ambiguity_note", obs.current_ticket)
+        self.assertNotIn("ambiguity_note", obs.current_ticket)
+        self.assertIn("context_status", obs.current_ticket)
+        self.assertIn(
+            "lookup_internal_routing_note",
+            obs.current_ticket["context_status"]["remaining_tools"],
+        )
+
+        obs = env.step(
+            HelpdeskTicketAction(
+                action_type="investigate",
+                tool_name="lookup_internal_routing_note",
+            )
+        )
+
         self.assertEqual(obs.current_ticket["ambiguity_note"], target.ambiguity_note)
+        self.assertGreater(obs.reward or 0.0, 0.0)
 
     def test_ambiguity_note_absent_when_ticket_has_none(self) -> None:
         """Tickets without ambiguity_note should not expose the key."""
@@ -370,6 +394,13 @@ class TestAmbiguityNoteInObservation(unittest.TestCase):
         with patch.object(env, "_dataset", [ticket]):
             obs = env.reset(seed=0, task_id=3)
 
+        self.assertNotIn("ambiguity_note", obs.current_ticket)
+        obs = env.step(
+            HelpdeskTicketAction(
+                action_type="investigate",
+                tool_name="lookup_internal_routing_note",
+            )
+        )
         self.assertIn("ambiguity_note", obs.current_ticket)
 
 
@@ -397,12 +428,27 @@ class TestRelatedTicketPreviewInObservation(unittest.TestCase):
             ):
                 obs = env.reset(seed=0, task_id=3, queue_size=1)
 
-        return env, obs, related
+        return env, obs, ticket, related
 
     def test_related_ticket_preview_present_when_ticket_has_link(self) -> None:
-        env, obs, related = self._reset_linked_ticket_env()
+        env, obs, ticket, related = self._reset_linked_ticket_env()
 
         self.assertIsNotNone(obs.current_ticket)
+        self.assertNotIn("related_ticket_preview", obs.current_ticket)
+        self.assertIn("context_status", obs.current_ticket)
+        self.assertIn(
+            "lookup_related_ticket",
+            obs.current_ticket["context_status"]["remaining_tools"],
+        )
+
+        obs = env.step(
+            HelpdeskTicketAction(
+                action_type="investigate",
+                tool_name="lookup_related_ticket",
+                tool_target_ticket_id=ticket.related_ticket_id,
+            )
+        )
+
         self.assertIn("related_ticket_preview", obs.current_ticket)
         self.assertEqual(
             obs.current_ticket["related_ticket_preview"]["ticket_id"],
@@ -414,8 +460,22 @@ class TestRelatedTicketPreviewInObservation(unittest.TestCase):
         )
 
     def test_history_keeps_related_ticket_preview_after_step(self) -> None:
-        env, obs, related = self._reset_linked_ticket_env()
-        next_obs = env.step(_heuristic_action(obs))
+        env, obs, ticket, related = self._reset_linked_ticket_env()
+        env.step(
+            HelpdeskTicketAction(
+                action_type="investigate",
+                tool_name="lookup_related_ticket",
+                tool_target_ticket_id=ticket.related_ticket_id,
+            )
+        )
+        next_obs = env.step(
+            HelpdeskTicketAction(
+                issue_type=ticket.issue_type,
+                priority=ticket.priority,
+                assignment_group=ticket.assignment_group,
+                resolution_action=ticket.resolution_action,
+            )
+        )
 
         self.assertGreaterEqual(len(next_obs.history), 1)
         self.assertIn("related_ticket_preview", next_obs.history[0])
@@ -562,6 +622,58 @@ class TestInvestigationActions(unittest.TestCase):
         self.assertEqual(obs2.last_tool_result["tool_name"], "lookup_requester_history")
         self.assertTrue(obs2.last_tool_result["found"])
         self.assertGreaterEqual(len(obs2.last_tool_result["matches"]), 1)
+
+    def test_internal_note_tool_reveals_hidden_hard_task_context(self) -> None:
+        from unittest.mock import patch
+
+        dataset = load_dataset()
+        ticket = next((t for t in dataset if t.ticket_id == "TKT-NONDEFAULT-003"), None)
+        self.assertIsNotNone(ticket)
+
+        env = _make_env()
+        with patch.object(env, "_dataset", [ticket]):
+            with patch.object(env, "_tickets_by_id", {ticket.ticket_id: ticket}):
+                obs = env.reset(seed=0, task_id=3, queue_size=1)
+
+        self.assertNotIn("ambiguity_note", obs.current_ticket)
+        obs = env.step(
+            HelpdeskTicketAction(
+                action_type="investigate",
+                tool_name="lookup_internal_routing_note",
+            )
+        )
+        self.assertEqual(obs.last_tool_result["routing_note"], ticket.ambiguity_note)
+        self.assertEqual(obs.current_ticket["ambiguity_note"], ticket.ambiguity_note)
+        self.assertGreater(obs.reward or 0.0, 0.0)
+
+    def test_submit_without_required_investigation_gets_shaping_penalty(self) -> None:
+        from unittest.mock import patch
+
+        dataset = load_dataset()
+        ticket = next((t for t in dataset if t.ticket_id == "TKT-NONDEFAULT-003"), None)
+        self.assertIsNotNone(ticket)
+
+        env = _make_env()
+        with patch.object(env, "_dataset", [ticket]):
+            with patch.object(env, "_tickets_by_id", {ticket.ticket_id: ticket}):
+                obs = env.reset(seed=0, task_id=3, queue_size=1)
+
+        final_obs = env.step(
+            HelpdeskTicketAction(
+                issue_type=ticket.issue_type,
+                priority=ticket.priority,
+                assignment_group=ticket.assignment_group,
+                resolution_action=ticket.resolution_action,
+            )
+        )
+
+        self.assertTrue(final_obs.done)
+        self.assertIsNotNone(final_obs.rubric_reward)
+        self.assertLess(final_obs.reward, final_obs.rubric_reward)
+        self.assertGreater(
+            final_obs.last_reward_components.get("context_gap_penalty", 0.0),
+            0.0,
+        )
 
 
 class TestQueueEconomics(unittest.TestCase):

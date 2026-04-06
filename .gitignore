@@ -6,3 +6,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 build/
+analysis/policy_learning_runs/
+analysis/policy_learning_test/
+analysis/policy_learning_compare_test/
+analysis/policy_learning_runs_smoke/

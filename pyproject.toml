@@ -24,12 +24,13 @@ dependencies = [
 
 [project.scripts]
 server = "server.app:main"
+policy-learn = "policy_learning:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "httpx"]
 
 [tool.setuptools]
-py-modules = ["models", "client", "vocabulary"]
+py-modules = ["models", "client", "policy_learning", "vocabulary"]
 
 [tool.setuptools.packages.find]
 include = ["server*"]

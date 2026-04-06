@@ -38,6 +38,8 @@ The environment models a realistic helpdesk workflow:
 4. the grader assigns deterministic credit
 5. the environment advances to the next ticket until the queue is complete
 
+For hard-task tickets, the environment can now withhold decisive routing context until the agent uses the right investigation tool. That keeps the task from collapsing into one-shot classification and makes tool choice part of the policy.
+
 This domain is useful for OpenEnv because it is operationally realistic, easy to evaluate with typed outputs, and naturally supports a clean easy-to-hard task ladder.
 
 ## Why This Is A Good Hackathon Domain
@@ -58,6 +60,37 @@ The project uses a queue-based episode model.
 - final reward is based on average ticket quality across the queue
 
 The environment classes and vocabulary are intentionally frozen to keep collaboration and judging simple.
+
+## Lightweight Policy Improvement Loop
+
+The repo now includes a small local learning runner in `policy_learning.py`. It does not update model weights, but it does run repeated rollouts over many seeds, log full trajectories, and select the best policy configuration from a discrete candidate set using observed reward.
+
+That gives the project a real improvement loop for judge demos:
+
+- compare `no_investigation` against `investigate_when_context_hidden`
+- log per-step rewards, feedback summaries, and reward components to JSONL
+- search over small policy variants such as `legacy_single_probe`, `context_chain`, and `hybrid_context`
+- select the best policy on train seeds, then re-evaluate it on holdout seeds
+
+Example commands:
+
+```bash
+python policy_learning.py compare --seeds 42-51 --task-ids 1,2,3
+python policy_learning.py search --train-seeds 40-49 --eval-seeds 50-59 --task-ids 1,2,3
+```
+
+Artifacts are written to `analysis/policy_learning_runs/` by default:
+
+- `compare_summary.json`
+- `compare_episodes.jsonl`
+- `compare_trajectories.jsonl`
+- `search_summary.json`
+- `search_train_episodes.jsonl`
+- `search_train_trajectories.jsonl`
+- `search_eval_episodes.jsonl`
+- `search_eval_trajectories.jsonl`
+
+The default submit policy inside this runner stays deterministic and local. It reuses the repo's heuristic routing logic, so the discrete policy search focuses on investigation behavior and reward-driven policy selection rather than on external LLM latency or API cost.
 
 ## Task Ladder
 
@@ -125,6 +158,7 @@ Each observation also includes:
 - `task_name`
 - `instructions`
 - `allowed_fields`
+- `available_action_types`
 - `available_tools`
 - `investigation_budget_remaining`
 - `last_tool_result`
@@ -133,7 +167,12 @@ Each observation also includes:
 - `tickets_after_current`
 - `tickets_processed`
 - `queue_position`
+- `average_score_so_far`
+- `progress_fraction`
 - `history`
+- `last_reward_components`
+- `rubric_reward` on terminal observations
+- `metadata.last_feedback_summary` for compact reward / penalty feedback
 - standard OpenEnv fields such as `done` and `reward`
 
 The internal `HelpdeskTicketState` tracks:
@@ -162,6 +201,15 @@ Available tools:
 
 - `lookup_related_ticket`
 - `lookup_requester_history`
+- `lookup_internal_routing_note`
+
+Hard-task investigation behavior:
+
+- some ambiguous and non-default-routing tickets start with redacted descriptions
+- linked-ticket previews and internal routing notes stay hidden until the matching tool is used
+- useful investigation steps return a small positive shaping reward
+- premature hard-task submission can incur a shaping penalty even when the visible text looks plausible
+- terminal `rubric_reward` remains the objective evaluation signal, while per-step `reward` is the denser training signal
 
 Per-field behavior:
 
@@ -189,6 +237,12 @@ The result is clamped to `[0.0, 1.0]`.
 Step reward is lightly milestone-shaped: high per-ticket scores get a small bonus and very low scores get a small penalty before the final clamp.
 
 Final reward also includes a tiny queue-economics penalty only when the agent exceeds the free investigation budget. One investigation per queued ticket is free; extra investigation steps reduce the final reward slightly.
+
+To make the environment more RL-friendly, each observation now also surfaces structured reward telemetry:
+
+- `last_reward_components` exposes ticket score, shaped step reward, milestone adjustment, trajectory reward when applicable, and any investigation penalty applied
+- `average_score_so_far` and `progress_fraction` expose trajectory progress without leaking future labels
+- `history` retains the same reward components plus a compact `feedback_summary` string for downstream agents
 
 ## Grounded Scoring
 
@@ -343,6 +397,7 @@ Optional target:
 
 - `ENV_URL`
 - default value: `http://localhost:7860`
+- `SEED`
 - `TASK_ID`
 - `RUN_ALL_TASKS`
 
