@@ -143,7 +143,7 @@ Suyash-side work completed:
   - all per-ticket scores stay in `[0.0, 1.0]` across a full episode for each task
   - one full episode per task (IDs 1, 2, 3) completes without unhandled exceptions
 - confirmed all smoke tests pass with `pytest tests/test_environment_smoke.py`
-- ran local runtime pass and recorded results in `bugs/BUGS_APRIL3.md`:
+- ran local runtime pass and recorded the results in this status log:
   - server started cleanly on port 8000
   - `GET /health` returned HTTP 200
   - `GET /tasks` returned exactly 3 tasks with IDs 1, 2, 3
@@ -193,7 +193,7 @@ Suyash-side work completed:
   - `POST /step` with a valid action returns observation JSON with reward in `[0.0, 1.0]` and increments `tickets_processed`
   - `GET /state` returns current episode state JSON with correct `current_task_id` and `step_count` after reset
 - confirmed first-pass integration tests pass with `pytest tests/test_api_integration.py`
-- audited current `inference.py` stdout against the official `[START]`, `[STEP]`, `[END]` format from `required.md` and recorded all gaps in `bugs/BUGS_APRIL3.md`:
+- audited current `inference.py` stdout against the official `[START]`, `[STEP]`, `[END]` format from `required.md`:
   - `[START]`, `[STEP]`, and per-episode `[END]` all contain the required fields
   - one actionable gap: overall summary reused the `[END]` tag without `task_id` or `final_reward`, making it ambiguous for automated parsers
   - extra fields in all three tags are harmless and require no change
@@ -227,7 +227,7 @@ Suyash-side work completed:
   - `[START]` emits `task_id`, `seed`, and contextual fields at the beginning of each episode
   - `[STEP]` emits `step`, `action`, and `reward` for each step
   - per-episode `[END]` emits `task_id` and `final_reward`
-  - replaced the ambiguous second `[END]` tag for the overall summary with a plain `print(f"Overall average reward: {overall:.4f}")` line
+  - the final overall summary now also stays structured through a closing `[END]` line with aggregate fields
   - confirmed no stray stdout output interferes with the structured log lines
 - reran heuristic baseline after the logging change and confirmed rewards still match the reference: Task 1 `1.0000`, Task 2 `0.8800`, Task 3 `0.9400`, overall `0.9400`
 
@@ -356,5 +356,9 @@ Corrections applied during freeze phase (task 10.2):
 - Fixed local setup commands in `README.md` to use port `7860` instead of `8000` (uvicorn start command and curl examples).
 - Fixed `ENV_URL` default value note in `README.md` to `http://localhost:7860`.
 - Removed unconfirmed `WebSocket /ws` row from the API surface table in `README.md`. The `/ws` endpoint is not listed in `openenv.yaml` api.endpoints and was not confirmed present during validation passes. Its absence is not a disqualifier per the April 6 deployment check.
+- Checked in `uv.lock` so the repo satisfies OpenEnv multi-mode deployment validation requirements on the current checkout.
+- Reran local `openenv validate` from the project virtualenv and confirmed the validator now passes.
+- Updated `README.md`, `KNOWLEDGE.md`, and `required.md` so they no longer describe the April 6 to April 7 roadmap items as pending.
+- Removed stale references to `bugs/BUGS_APRIL3.md` and kept the validation narrative self-contained inside `PROJECT_STATUS.md`.
 
-No runtime logic was changed. No new features were added. All other files checked (openenv.yaml, pyproject.toml, requirements.txt, ROADMAP.md, KNOWLEDGE.md, bugs/BUGS_APRIL3.md) were found accurate and required no corrections.
+No runtime logic was changed. No new features were added. All other files checked (`openenv.yaml`, `pyproject.toml`, `requirements.txt`, `ROADMAP.md`) were found accurate and required no further corrections.
