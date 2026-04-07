@@ -100,11 +100,11 @@ def _get_tasks_to_run_impl(
         if task_id not in available_tasks:
             raise SystemExit(1)
         return [task_id]
-    if run_all_tasks:
-        return sorted(available_tasks)
     if not available_tasks:
         return []
-    return [sorted(available_tasks)[0]]
+    if run_all_tasks:
+        return sorted(available_tasks)
+    return sorted(available_tasks)
 
 
 class TestInferenceSingleTaskMode(unittest.TestCase):
@@ -120,10 +120,10 @@ class TestInferenceSingleTaskMode(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _get_tasks_to_run_impl("999", available)
 
-    def test_task_id_unset_defaults_to_first_available_task(self) -> None:
+    def test_task_id_unset_defaults_to_all_available_tasks(self) -> None:
         available = {1: {}, 2: {}, 3: {}}
         result = _get_tasks_to_run_impl(None, available)
-        self.assertEqual(result, [1])
+        self.assertEqual(result, [1, 2, 3])
 
     def test_run_all_tasks_override_returns_all_task_ids(self) -> None:
         available = {1: {}, 2: {}, 3: {}}
@@ -710,7 +710,7 @@ class TestQueueEconomics(unittest.TestCase):
         final_obs = env.step(HelpdeskTicketAction(issue_type=ticket.issue_type))
 
         self.assertTrue(final_obs.done)
-        self.assertAlmostEqual(final_obs.reward, 0.97, places=9)
+        self.assertAlmostEqual(final_obs.reward, 0.95, places=9)
 
 
 class TestTerminalInvalidActionFinalReward(unittest.TestCase):

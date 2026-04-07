@@ -205,9 +205,10 @@ Available tools:
 
 Hard-task investigation behavior:
 
-- some ambiguous and non-default-routing tickets start with redacted descriptions
+- some ambiguous and non-default-routing tickets start with both redacted titles and redacted descriptions
 - linked-ticket previews and internal routing notes stay hidden until the matching tool is used
-- useful investigation steps return a small positive shaping reward
+- only useful investigation steps return a small positive shaping reward
+- blind or repeated probing does not pay by default
 - premature hard-task submission can incur a shaping penalty even when the visible text looks plausible
 - terminal `rubric_reward` remains the objective evaluation signal, while per-step `reward` is the denser training signal
 
@@ -215,8 +216,8 @@ Per-field behavior:
 
 - `issue_type`: exact match, with a few near-miss partial-credit pairs
 - `priority`: exact match or proximity credit
-- `assignment_group`: exact match
-- `resolution_action`: exact match
+- `assignment_group`: exact match, with a small declared partial-credit map for nearby ownership mistakes
+- `resolution_action`: exact match, with a small declared partial-credit map for nearby next-step mistakes
 
 Task weights:
 
@@ -236,7 +237,7 @@ The result is clamped to `[0.0, 1.0]`.
 
 Step reward is lightly milestone-shaped: high per-ticket scores get a small bonus and very low scores get a small penalty before the final clamp.
 
-Final reward also includes a tiny queue-economics penalty only when the agent exceeds the free investigation budget. One investigation per queued ticket is free; extra investigation steps reduce the final reward slightly.
+Final reward also includes a queue-economics penalty when the agent exceeds the free investigation budget. One investigation per queued ticket is free, but extra investigation steps reduce the final reward more noticeably than before.
 
 To make the environment more RL-friendly, each observation now also surfaces structured reward telemetry:
 
@@ -246,10 +247,10 @@ To make the environment more RL-friendly, each observation now also surfaces str
 
 ## Grounded Scoring
 
-The grader is intentionally not fuzzy by default.
+The grader is intentionally narrow and declared, not fully fuzzy.
 
 - exact match is the dominant path for every field
-- `assignment_group` and `resolution_action` are exact-match only
+- `assignment_group` and `resolution_action` now expose only a small declared partial-credit map for nearby mistakes
 - `priority` only gets proximity credit from the declared table in `server/grader.py`
 - `issue_type` only gets partial credit for a small declared similarity map
 - wrong labels outside those explicit maps score `0.0`
@@ -363,7 +364,7 @@ curl http://localhost:7860/tasks
 
 ## Running The Baseline Inference Script
 
-The baseline script supports single-task evaluator mode by default, plus an explicit local batch override.
+The baseline script defaults to all declared tasks when `TASK_ID` is not set, which keeps local runs aligned with validator-style sweeps.
 
 ### Heuristic mode
 
@@ -373,7 +374,7 @@ If no LLM credentials are set, it uses a keyword-based ticket router:
 python inference.py
 ```
 
-By default that runs exactly one task and emits exactly one `[START] ... [END]` block. To target a specific task:
+By default that runs all declared tasks and emits a structured `[START] ... [STEP] ... [END]` block for each task. To target a specific task:
 
 ```bash
 TASK_ID=3 python inference.py
@@ -401,6 +402,7 @@ Optional target:
 - `SEED`
 - `TASK_ID`
 - `RUN_ALL_TASKS`
+  compatibility alias for local tooling; all tasks already run by default when `TASK_ID` is unset
 
 To reproduce the multi-task local benchmark sweep:
 
@@ -420,16 +422,13 @@ Validated locally:
 - `/reset`
 - heuristic `inference.py` run across all 3 tasks with `RUN_ALL_TASKS=1`
 
-Current local heuristic results:
+Current local smoke expectations:
 
-| Task | Result |
-|------|--------|
-| Issue Type Classification | `1.0000` |
-| Issue Type And Priority | `0.8800` |
-| Full Ticket Routing | `0.9400` |
-| Overall | `0.9400` |
+- the baseline completes all 3 tasks successfully
+- rewards remain in range for every task
+- the hard task now depends much more heavily on investigation behavior, so exact seed-level baseline numbers are no longer treated as the benchmark reference for the repo
 
-The merged-state rerun matched these same numbers exactly, so they are the current benchmark reference for the repo. The April 6 to April 7 validation pass then closed the remaining roadmap gates with Docker smoke coverage via GitHub Actions, a clean-copy install-and-run rerun, structured inference-log verification, and a passing local `openenv validate` check after checking in `uv.lock`.
+The April 6 to April 7 validation pass then closed the remaining roadmap gates with Docker smoke coverage via GitHub Actions, a clean-copy install-and-run rerun, structured inference-log verification, and a passing local `openenv validate` check after checking in `uv.lock`.
 
 ### Windows note
 
@@ -440,7 +439,7 @@ During the first runtime pass, the repo surfaced a Windows-specific JSON issue w
 Build:
 
 ```bash
-docker build -f server/Dockerfile -t helpdesk-ticket-routing .
+docker build -t helpdesk-ticket-routing .
 ```
 
 Run locally:

@@ -26,12 +26,11 @@ HF_TOKEN
 
 TASK_ID
     Optional OpenEnv task ID to run. When unset, the script defaults to the
-    first available task so it still emits exactly one ``[START]`` ... ``[END]``
-    block for evaluator-style runs.
+    full declared task set so evaluator-style runs exercise every grader.
 
 RUN_ALL_TASKS
-    Optional local-development override. Set to ``1`` to run every available
-    task in sequence and print the aggregate closing ``[END]`` summary.
+    Optional backwards-compatible local-development alias. The script already
+    runs every available task when TASK_ID is unset.
 
 LOCAL_IMAGE_NAME
     Optional compatibility variable from the sample inference pattern.
@@ -761,6 +760,10 @@ def should_investigate(ticket: dict, history: list[dict[str, Any]]) -> tuple[boo
     if not ticket:
         return False, None
     context_status = ticket.get("context_status") or {}
+    hidden_context_remaining = bool(context_status.get("hidden_context_remaining"))
+    investigation_required = bool(context_status.get("investigation_required"))
+    if not investigation_required and not hidden_context_remaining:
+        return False, None
     current_ticket_id = ticket.get("ticket_id")
     prior_ticket_history = [
         entry
@@ -777,7 +780,6 @@ def should_investigate(ticket: dict, history: list[dict[str, Any]]) -> tuple[boo
         for entry in prior_ticket_history
         if entry.get("predicted", {}).get("action_type") == "investigate"
     )
-    hidden_context_remaining = bool(context_status.get("hidden_context_remaining"))
     if investigations_used >= 3:
         return False, None
 
@@ -786,6 +788,14 @@ def should_investigate(ticket: dict, history: list[dict[str, Any]]) -> tuple[boo
         for entry in prior_ticket_history
         if entry.get("predicted", {}).get("action_type") == "investigate"
     }
+    recommended_tools = [
+        tool_name
+        for tool_name in context_status.get("recommended_tools", [])
+        if tool_name not in used_tools
+    ]
+    if hidden_context_remaining and recommended_tools:
+        return True, recommended_tools[0]
+
     routing_text = build_routing_text(ticket)
     last_tool_result = ticket.get("last_tool_result") or {}
     last_tool_name = str(last_tool_result.get("tool_name", "") or "")
@@ -859,10 +869,6 @@ def should_investigate(ticket: dict, history: list[dict[str, Any]]) -> tuple[boo
 
     if already_investigated and not hidden_context_remaining:
         return False, None
-    if ticket.get("ambiguity_note") and "lookup_internal_routing_note" not in used_tools:
-        return True, "lookup_internal_routing_note"
-    if ticket.get("related_ticket_id") and "lookup_related_ticket" not in used_tools:
-        return True, "lookup_related_ticket"
     return False, None
 
 

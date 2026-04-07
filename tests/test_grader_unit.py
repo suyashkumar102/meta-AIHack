@@ -6,12 +6,14 @@ import openenv_test_stubs  # noqa: F401
 
 from models import HelpdeskTicketAction, HelpdeskTicketRecord
 from server.grader import (
+    ASSIGNMENT_GROUP_SIMILARITY,
     ISSUE_TYPE_SIMILARITY,
     PRIORITY_SCORES,
+    RESOLUTION_ACTION_SIMILARITY,
     TASK_WEIGHTS,
     grade_action,
 )
-from vocabulary import ISSUE_TYPES, PRIORITIES
+from vocabulary import ASSIGNMENT_GROUPS, ISSUE_TYPES, PRIORITIES, RESOLUTION_ACTIONS
 
 
 def _ticket(
@@ -143,12 +145,26 @@ class GraderUnitTests(unittest.TestCase):
         self.assertEqual(breakdown, {"issue_type": 1.0, "priority": 0.5})
         self.assertAlmostEqual(score, 0.8)
 
-    def test_assignment_group_is_exact_match_only(self) -> None:
+    def test_assignment_group_partial_credit_uses_declared_similarity_table(self) -> None:
         ticket = _ticket()
         action = HelpdeskTicketAction(
             issue_type="billing_license",
             priority="high",
-            assignment_group="service_desk",
+            assignment_group="procurement",
+            resolution_action="fulfill",
+        )
+
+        score, breakdown = grade_action(action, ticket, task_id=3)
+
+        self.assertEqual(breakdown["assignment_group"], 0.55)
+        self.assertAlmostEqual(score, 0.8875)
+
+    def test_assignment_group_unrelated_miss_stays_zero(self) -> None:
+        ticket = _ticket()
+        action = HelpdeskTicketAction(
+            issue_type="billing_license",
+            priority="high",
+            assignment_group="security_team",
             resolution_action="fulfill",
         )
 
@@ -162,7 +178,7 @@ class GraderUnitTests(unittest.TestCase):
         action = HelpdeskTicketAction(
             issue_type="billing_license",
             priority="medium",
-            assignment_group="service_desk",
+            assignment_group="security_team",
             resolution_action="fulfill",
         )
 
@@ -179,19 +195,97 @@ class GraderUnitTests(unittest.TestCase):
         )
         self.assertAlmostEqual(score, 0.65)
 
-    def test_resolution_action_is_exact_match_only(self) -> None:
+    def test_resolution_action_partial_credit_uses_declared_similarity_table(self) -> None:
         ticket = _ticket()
         action = HelpdeskTicketAction(
             issue_type="billing_license",
             priority="high",
             assignment_group="license_ops",
-            resolution_action="assign",
+            resolution_action="acknowledge",
+        )
+
+        score, breakdown = grade_action(action, ticket, task_id=3)
+
+        self.assertEqual(breakdown["resolution_action"], 0.35)
+        self.assertAlmostEqual(score, 0.87)
+
+    def test_resolution_action_unrelated_miss_stays_zero(self) -> None:
+        ticket = _ticket()
+        action = HelpdeskTicketAction(
+            issue_type="billing_license",
+            priority="high",
+            assignment_group="license_ops",
+            resolution_action="ignore",
         )
 
         score, breakdown = grade_action(action, ticket, task_id=3)
 
         self.assertEqual(breakdown["resolution_action"], 0.0)
         self.assertAlmostEqual(score, 0.8)
+
+    def test_assignment_group_scoring_matches_declared_similarity_table_exhaustively(self) -> None:
+        for expected in ASSIGNMENT_GROUPS:
+            for predicted in ASSIGNMENT_GROUPS:
+                with self.subTest(expected=expected, predicted=predicted):
+                    ticket = _ticket(assignment_group=expected)
+                    action = HelpdeskTicketAction(
+                        issue_type="billing_license",
+                        priority="high",
+                        assignment_group=predicted,
+                        resolution_action="fulfill",
+                    )
+
+                    score, breakdown = grade_action(action, ticket, task_id=3)
+
+                    assignment_group_score = (
+                        1.0
+                        if predicted == expected
+                        else ASSIGNMENT_GROUP_SIMILARITY.get((predicted, expected), 0.0)
+                    )
+                    self.assertEqual(
+                        breakdown,
+                        {
+                            "issue_type": 1.0,
+                            "priority": 1.0,
+                            "assignment_group": assignment_group_score,
+                            "resolution_action": 1.0,
+                        },
+                    )
+                    raw_score = 0.35 + 0.20 + 0.25 * assignment_group_score + 0.20
+                    expected_task_score = max(0.01, min(0.99, raw_score))
+                    self.assertAlmostEqual(score, expected_task_score)
+
+    def test_resolution_action_scoring_matches_declared_similarity_table_exhaustively(self) -> None:
+        for expected in RESOLUTION_ACTIONS:
+            for predicted in RESOLUTION_ACTIONS:
+                with self.subTest(expected=expected, predicted=predicted):
+                    ticket = _ticket(resolution_action=expected)
+                    action = HelpdeskTicketAction(
+                        issue_type="billing_license",
+                        priority="high",
+                        assignment_group="license_ops",
+                        resolution_action=predicted,
+                    )
+
+                    score, breakdown = grade_action(action, ticket, task_id=3)
+
+                    resolution_action_score = (
+                        1.0
+                        if predicted == expected
+                        else RESOLUTION_ACTION_SIMILARITY.get((predicted, expected), 0.0)
+                    )
+                    self.assertEqual(
+                        breakdown,
+                        {
+                            "issue_type": 1.0,
+                            "priority": 1.0,
+                            "assignment_group": 1.0,
+                            "resolution_action": resolution_action_score,
+                        },
+                    )
+                    raw_score = 0.35 + 0.20 + 0.25 + 0.20 * resolution_action_score
+                    expected_task_score = max(0.01, min(0.99, raw_score))
+                    self.assertAlmostEqual(score, expected_task_score)
 
     def test_partial_credit_tables_never_override_exact_match(self) -> None:
         for pair, value in ISSUE_TYPE_SIMILARITY.items():
@@ -201,6 +295,16 @@ class GraderUnitTests(unittest.TestCase):
 
         for pair, value in PRIORITY_SCORES.items():
             with self.subTest(table="priority", pair=pair):
+                self.assertGreater(value, 0.0)
+                self.assertLess(value, 1.0)
+
+        for pair, value in ASSIGNMENT_GROUP_SIMILARITY.items():
+            with self.subTest(table="assignment_group", pair=pair):
+                self.assertGreater(value, 0.0)
+                self.assertLess(value, 1.0)
+
+        for pair, value in RESOLUTION_ACTION_SIMILARITY.items():
+            with self.subTest(table="resolution_action", pair=pair):
                 self.assertGreater(value, 0.0)
                 self.assertLess(value, 1.0)
 

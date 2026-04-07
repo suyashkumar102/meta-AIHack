@@ -33,12 +33,13 @@ AVAILABLE_TOOLS = (
     "lookup_internal_routing_note",
 )
 FREE_INVESTIGATIONS_PER_TICKET = 1
-EXTRA_INVESTIGATION_COST = 0.02
-MAX_EXTRA_INVESTIGATION_PENALTY = 0.15
-USEFUL_INVESTIGATION_REWARD = 0.08
-PREMATURE_SUBMIT_PENALTY = 0.10
-CONTEXT_COMPLETION_BONUS = 0.04
-TRAJECTORY_CONTEXT_COMPLETION_BONUS = 0.03
+EXTRA_INVESTIGATION_COST = 0.04
+MAX_EXTRA_INVESTIGATION_PENALTY = 0.25
+USEFUL_INVESTIGATION_REWARD = 0.03
+PREMATURE_SUBMIT_PENALTY = 0.22
+NONDEFAULT_HIDDEN_CONTEXT_PENALTY = 0.08
+CONTEXT_COMPLETION_BONUS = 0.06
+TRAJECTORY_CONTEXT_COMPLETION_BONUS = 0.04
 PRIORITY_UNDERSHOOT_PENALTY = 0.03
 SEVERE_PRIORITY_UNDERSHOOT_PENALTY = 0.07
 DANGEROUS_RESOLUTION_PENALTY = 0.05
@@ -93,6 +94,18 @@ HARD_TASK_DESCRIPTION_REDACTIONS: dict[str, str] = {
         "A contractor onboarding workflow is blocked by an account problem. "
         "Additional routing context is available via investigation."
     ),
+}
+
+HARD_TASK_TITLE_REDACTIONS: dict[str, str] = {
+    "ticket-021": "Production workflow regression",
+    "ticket-022": "Time-sensitive account review",
+    "ticket-027": "Commercial workflow request",
+    "ticket-029": "Urgent expansion request",
+    "ticket-038": "Repeated invoice follow-up",
+    "ticket-045": "Company-wide account issue",
+    "TKT-NONDEFAULT-001": "Billing-style routing question",
+    "TKT-NONDEFAULT-002": "Compliance ownership question",
+    "TKT-NONDEFAULT-003": "Workflow blocker with hidden owner",
 }
 
 
@@ -412,6 +425,55 @@ class HelpdeskTicketRoutingEnvironment(
             return 0.0
         return sum(self._state.per_ticket_scores) / len(self._state.per_ticket_scores)
 
+    def _internal_routing_note_for_ticket(
+        self,
+        ticket: HelpdeskTicketRecord,
+    ) -> str | None:
+        if ticket.ambiguity_note is not None:
+            return ticket.ambiguity_note
+        if self._state.current_task_id != 3:
+            return None
+
+        default_group = ISSUE_TYPE_TO_ASSIGNMENT_GROUP.get(
+            ticket.issue_type,
+            ticket.assignment_group,
+        )
+        default_action = ISSUE_TYPE_TO_RESOLUTION_ACTION.get(
+            ticket.issue_type,
+            ticket.resolution_action,
+        )
+        note_parts: list[str] = []
+
+        if ticket.assignment_group != default_group:
+            note_parts.append(
+                "Routing override: send this to "
+                f"{ticket.assignment_group} rather than the default {default_group} queue."
+            )
+        if ticket.resolution_action != default_action:
+            note_parts.append(
+                "Action override: use "
+                f"{ticket.resolution_action} instead of the default {default_action} next step."
+            )
+        if ticket.issue_type == "onboarding" and ticket.assignment_group == "service_desk":
+            note_parts.append(
+                "The onboarding workflow is blocked by an access dependency, so the unblocker owns the next move."
+            )
+        if (
+            ticket.issue_type == "security_compliance"
+            and ticket.assignment_group == "application_team"
+        ):
+            note_parts.append(
+                "This compliance issue needs a product-team fix rather than a central security handoff."
+            )
+        if ticket.issue_type == "billing_license" and ticket.assignment_group == "procurement":
+            note_parts.append(
+                "Treat this as commercial procurement work instead of routine license fulfillment."
+            )
+
+        if not note_parts:
+            return None
+        return " ".join(note_parts)
+
     def _ticket_has_nondefault_routing(self, ticket: HelpdeskTicketRecord) -> bool:
         return (
             ticket.assignment_group
@@ -441,6 +503,22 @@ class HelpdeskTicketRoutingEnvironment(
     def _ticket_repeated_requester_count(self, ticket: HelpdeskTicketRecord) -> int:
         return sum(1 for candidate in self._dataset if candidate.requester == ticket.requester)
 
+    def _tool_has_available_context(
+        self,
+        ticket: HelpdeskTicketRecord,
+        tool_name: str,
+    ) -> bool:
+        if tool_name == "lookup_related_ticket":
+            return (
+                ticket.related_ticket_id is not None
+                and ticket.related_ticket_id in self._tickets_by_id
+            )
+        if tool_name == "lookup_requester_history":
+            return self._ticket_repeated_requester_count(ticket) >= 2
+        if tool_name == "lookup_internal_routing_note":
+            return self._internal_routing_note_for_ticket(ticket) is not None
+        return False
+
     def _required_tools_for_ticket(
         self,
         ticket: HelpdeskTicketRecord,
@@ -453,8 +531,9 @@ class HelpdeskTicketRoutingEnvironment(
         if ticket.related_ticket_id is not None and "lookup_related_ticket" not in required_tools:
             required_tools.append("lookup_related_ticket")
         if (
-            ticket.ambiguity_note is not None or self._ticket_has_nondefault_routing(ticket)
-        ) and "lookup_internal_routing_note" not in required_tools:
+            self._internal_routing_note_for_ticket(ticket) is not None
+            and "lookup_internal_routing_note" not in required_tools
+        ):
             required_tools.append("lookup_internal_routing_note")
         if (
             self._ticket_repeated_requester_count(ticket) >= 2
@@ -467,7 +546,13 @@ class HelpdeskTicketRoutingEnvironment(
             and "lookup_requester_history" not in required_tools
         ):
             required_tools.append("lookup_requester_history")
-        return required_tools
+        filtered_required_tools: list[str] = []
+        for tool_name in required_tools:
+            if tool_name in filtered_required_tools:
+                continue
+            if self._tool_has_available_context(ticket, tool_name):
+                filtered_required_tools.append(tool_name)
+        return filtered_required_tools
 
     def _used_tools_for_ticket(self, ticket_id: str) -> list[str]:
         return list(self._state.ticket_tool_usage.get(ticket_id, []))
@@ -503,22 +588,38 @@ class HelpdeskTicketRoutingEnvironment(
     def _default_redacted_description(self, ticket: HelpdeskTicketRecord) -> str:
         if ticket.related_ticket_id is not None:
             return (
-                "This is a follow-up operational issue that references prior work. "
+                "This is a follow-up operational issue. "
                 "Additional routing context is available via investigation."
             )
-        if ticket.ambiguity_note is not None:
+        if self._internal_routing_note_for_ticket(ticket) is not None:
             return (
-                "This ticket mixes multiple plausible workflows. "
+                "The visible request is not enough to choose the final owner and next step. "
                 "Additional routing context is available via investigation."
             )
         if self._ticket_has_nondefault_routing(ticket):
             return (
-                "The visible request looks straightforward, but the decisive routing "
-                "detail is hidden until investigation."
+                "The visible request looks straightforward, but the decisive routing detail is hidden until investigation."
             )
         return (
             "Additional routing context is available via investigation before final submission."
         )
+
+    def _default_redacted_title(self, ticket: HelpdeskTicketRecord) -> str:
+        if ticket.related_ticket_id is not None:
+            return "Follow-up request with hidden routing context"
+        if self._internal_routing_note_for_ticket(ticket) is not None:
+            return "Routing clarification required"
+        if self._ticket_mentions_follow_up(ticket):
+            return "Priority support follow-up"
+        return "Helpdesk routing decision"
+
+    def _visible_title(self, ticket: HelpdeskTicketRecord) -> str:
+        if self._state.current_task_id == 3 and self._remaining_tools_for_ticket(ticket):
+            return HARD_TASK_TITLE_REDACTIONS.get(
+                ticket.ticket_id,
+                self._default_redacted_title(ticket),
+            )
+        return ticket.title
 
     def _visible_description(self, ticket: HelpdeskTicketRecord) -> str:
         if self._state.current_task_id == 3 and self._remaining_tools_for_ticket(ticket):
@@ -537,7 +638,11 @@ class HelpdeskTicketRoutingEnvironment(
         penalty = PREMATURE_SUBMIT_PENALTY * (
             len(remaining_tools) / max(1, len(required_tools))
         )
-        return penalty, len(remaining_tools)
+        if self._ticket_has_nondefault_routing(ticket):
+            penalty += NONDEFAULT_HIDDEN_CONTEXT_PENALTY * (
+                len(remaining_tools) / max(1, len(required_tools))
+            )
+        return round(min(0.45, penalty), 4), len(remaining_tools)
 
     def _context_completion_bonus(
         self,
@@ -691,12 +796,13 @@ class HelpdeskTicketRoutingEnvironment(
         }
 
     def _lookup_internal_routing_note(self, current_ticket: HelpdeskTicketRecord) -> dict[str, Any]:
-        found = current_ticket.ambiguity_note is not None
+        routing_note = self._internal_routing_note_for_ticket(current_ticket)
+        found = routing_note is not None
         return {
             "tool_name": "lookup_internal_routing_note",
             "found": found,
             "ticket_id": current_ticket.ticket_id,
-            "routing_note": current_ticket.ambiguity_note if found else "",
+            "routing_note": routing_note if found else "",
         }
 
     def _run_investigation_tool(
@@ -753,10 +859,8 @@ class HelpdeskTicketRoutingEnvironment(
             self._state.investigation_budget_remaining - 1,
         )
         self._state.last_tool_result = tool_result
-        investigation_reward = clamp_open_unit_interval(
-            USEFUL_INVESTIGATION_REWARD if useful_investigation else 0.0
-        )
-        investigation_score = clamp_open_unit_interval(0.0)
+        investigation_reward = USEFUL_INVESTIGATION_REWARD if useful_investigation else 0.0
+        investigation_score = 0.0
         self._state.last_step_reward = investigation_reward
         self._state.reward = investigation_reward
         self._state.done = False
@@ -799,7 +903,7 @@ class HelpdeskTicketRoutingEnvironment(
         remaining_tools = progress["remaining_tools"]
         ticket_view: dict[str, Any] = {
             "ticket_id": ticket.ticket_id,
-            "title": ticket.title,
+            "title": self._visible_title(ticket),
             "requester": ticket.requester,
             "description": self._visible_description(ticket),
         }
@@ -811,6 +915,7 @@ class HelpdeskTicketRoutingEnvironment(
                 "revealed_context_count": progress["revealed_count"],
                 "context_completeness": progress["completeness"],
                 "investigations_used_for_ticket": progress["revealed_count"],
+                "recommended_tools": list(remaining_tools),
             }
         if ticket.ambiguity_note is not None and "lookup_internal_routing_note" not in remaining_tools:
             ticket_view["ambiguity_note"] = ticket.ambiguity_note

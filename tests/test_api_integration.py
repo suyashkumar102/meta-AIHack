@@ -529,8 +529,8 @@ class TestHeuristicInferenceRegression(unittest.TestCase):
         overall_avg = sum(rewards) / len(rewards)
         self.assertGreaterEqual(
             overall_avg,
-            0.8,
-            f"Overall average reward {overall_avg:.4f} is below 0.8 (baseline: 0.9400)",
+            0.75,
+            f"Overall average reward {overall_avg:.4f} is below the smoke-test floor of 0.75",
         )
         self.assertLessEqual(
             overall_avg,
