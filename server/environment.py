@@ -14,6 +14,7 @@ from models import (
 )
 from server.grader import grade_action
 from server.reward import (
+    clamp_open_unit_interval,
     compute_step_adjustments,
     compute_trajectory_adjustments,
 )
@@ -310,7 +311,7 @@ class HelpdeskTicketRoutingEnvironment(
             )
             trajectory_reward = trajectory_components["final_reward"]
             rubric_reward = self._apply_episode_economics(trajectory_reward)
-            final_reward = max(0.0, min(1.0, rubric_reward - context_penalty))
+            final_reward = clamp_open_unit_interval(rubric_reward - context_penalty)
             self._state.total_reward = rubric_reward
             investigation_penalty = self._compute_episode_penalty()
         else:
@@ -403,7 +404,7 @@ class HelpdeskTicketRoutingEnvironment(
 
     def _apply_episode_economics(self, base_reward: float) -> float:
         penalty = self._compute_episode_penalty()
-        return max(0.0, min(1.0, base_reward - penalty))
+        return clamp_open_unit_interval(base_reward - penalty)
 
     def _current_average_score(self) -> float:
         if not self._state.per_ticket_scores:

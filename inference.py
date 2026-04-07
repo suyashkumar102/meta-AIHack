@@ -307,12 +307,14 @@ def get_tasks_to_run(available_tasks: dict) -> list[int]:
             )
             raise SystemExit(1)
         return [task_id]
-    if RUN_ALL_TASKS_ENV:
-        return available_task_ids
     if not available_task_ids:
         return []
-    # Default to a single task so evaluation emits exactly one START/END block.
-    return [available_task_ids[0]]
+    # Default to all declared tasks so validator-style runs exercise all graders.
+    return available_task_ids
+
+
+def clamp_reported_score(score: float) -> float:
+    return max(0.001, min(0.999, score))
 
 
 # ---------------------------------------------------------------------------
@@ -852,8 +854,6 @@ def run() -> None:
     tasks_to_run = get_tasks_to_run(available_tasks)
     if not tasks_to_run:
         return
-    single_task_mode = len(tasks_to_run) == 1
-
     for task_id in tasks_to_run:
         if task_id not in available_tasks:
             continue
@@ -952,19 +952,11 @@ def run() -> None:
         emit_log(
             "END",
             final_reward=round(final_reward, 4),
+            score=round(clamp_reported_score(final_reward), 4),
             step_count=step_num,
             task_id=task_id,
             task_name=task["name"],
         )
-
-    overall = [
-        float(all_results[task_id]["final_reward"])
-        for task_id in tasks_to_run
-        if task_id in all_results
-    ]
-    if not single_task_mode:
-        overall_avg = round(sum(overall) / len(overall), 4) if overall else 0.0
-        emit_log("END", overall_avg=overall_avg, tasks_completed=len(overall))
 
 
 if __name__ == "__main__":

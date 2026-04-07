@@ -187,7 +187,7 @@ class InferenceUnitTests(unittest.TestCase):
 
         self.assertEqual(
             inference.get_tasks_to_run({1: {}, 2: {}, 3: {}}),
-            [1],
+            [1, 2, 3],
         )
 
     def test_run_all_tasks_override_keeps_local_batch_mode_available(self) -> None:

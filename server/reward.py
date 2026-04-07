@@ -8,10 +8,15 @@ DELTA_REWARD_WEIGHT = 0.08
 DELTA_REWARD_CAP = 0.04
 PROCESS_BONUS_CAP = 0.08
 RISK_PENALTY_CAP = 0.12
+OPEN_INTERVAL_EPSILON = 0.001
 
 
 def _clamp_unit_interval(value: float) -> float:
     return max(0.0, min(1.0, value))
+
+
+def clamp_open_unit_interval(value: float, epsilon: float = OPEN_INTERVAL_EPSILON) -> float:
+    return max(epsilon, min(1.0 - epsilon, value))
 
 
 def compute_step_adjustments(
@@ -88,7 +93,7 @@ def compute_trajectory_adjustments(
     avg = sum(per_ticket_scores) / len(per_ticket_scores)
     bounded_completion_bonus = max(0.0, min(0.08, completion_bonus))
     bounded_consistency_bonus = max(0.0, min(0.05, consistency_bonus))
-    final_reward = _clamp_unit_interval(
+    final_reward = clamp_open_unit_interval(
         avg + bounded_completion_bonus + bounded_consistency_bonus
     )
     return {

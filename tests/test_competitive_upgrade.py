@@ -710,7 +710,7 @@ class TestQueueEconomics(unittest.TestCase):
         final_obs = env.step(HelpdeskTicketAction(issue_type=ticket.issue_type))
 
         self.assertTrue(final_obs.done)
-        self.assertAlmostEqual(final_obs.reward, 0.98, places=9)
+        self.assertAlmostEqual(final_obs.reward, 0.979, places=9)
 
 
 class TestTerminalInvalidActionFinalReward(unittest.TestCase):
