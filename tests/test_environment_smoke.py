@@ -124,6 +124,8 @@ class TestResetAllTaskIds(unittest.TestCase):
         env = _make_env()
         obs = env.reset(seed=42, task_id=2)
         self._assert_valid_reset_obs(obs, 2)
+        self.assertIn("defer", obs.available_action_types)
+        self.assertIn("lookup_queue_cluster_summary", obs.available_tools)
 
     def test_reset_task3(self) -> None:
         env = _make_env()
@@ -256,6 +258,22 @@ class TestSeededDeterminism(unittest.TestCase):
         self.assertTrue(
             repeated_cluster_ids,
             f"Expected at least one repeated service_cluster_id in task 3 queue, got {cluster_ids}",
+        )
+
+    def test_task2_queue_sampling_includes_clustered_follow_on(self) -> None:
+        env = _make_env()
+        env.reset(seed=42, task_id=2, queue_size=5)
+
+        cluster_ids = [
+            ticket.service_cluster_id for ticket in env._queue if ticket.service_cluster_id
+        ]
+        repeated_cluster_ids = {
+            cluster_id for cluster_id in cluster_ids if cluster_ids.count(cluster_id) >= 2
+        }
+
+        self.assertTrue(
+            repeated_cluster_ids,
+            f"Expected at least one repeated service_cluster_id in task 2 queue, got {cluster_ids}",
         )
 
 

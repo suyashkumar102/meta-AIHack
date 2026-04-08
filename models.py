@@ -214,6 +214,8 @@ class HelpdeskTicketState(State):
     escalation_slots_remaining: int = 0
     planning_penalty_total: float = 0.0
     capacity_pressure_tickets_resolved: int = 0
+    cluster_stabilizations_total: int = 0
+    cluster_destabilizations_total: int = 0
     ticket_request_info_usage: dict[str, int] = Field(default_factory=dict)
     ticket_defer_counts: dict[str, int] = Field(default_factory=dict)
     open_incident_ticket_ids: list[str] = Field(default_factory=list)
@@ -226,4 +228,6 @@ class HelpdeskTicketState(State):
     spawned_follow_up_ticket_ids: list[str] = Field(default_factory=list)
     spawned_follow_up_source_ids: list[str] = Field(default_factory=list)
     dynamic_queue_events: list[dict[str, Any]] = Field(default_factory=list)
+    queue_management_score: float = 0.0
+    queue_management_breakdown: dict[str, Any] = Field(default_factory=dict)
     history_entries: list[dict] = Field(default_factory=list)

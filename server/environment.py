@@ -35,7 +35,7 @@ BASE_AVAILABLE_TOOLS = (
 )
 TASK_AVAILABLE_ACTION_TYPES: dict[int, tuple[str, ...]] = {
     1: ("submit", "investigate"),
-    2: ("submit", "investigate", "request_info"),
+    2: ("submit", "investigate", "request_info", "defer"),
     3: ("submit", "investigate", "request_info", "defer", "open_incident"),
 }
 TASK_AVAILABLE_TOOLS: dict[int, tuple[str, ...]] = {
@@ -48,6 +48,7 @@ TASK_AVAILABLE_TOOLS: dict[int, tuple[str, ...]] = {
         "lookup_related_ticket",
         "lookup_requester_history",
         "lookup_internal_routing_note",
+        "lookup_queue_cluster_summary",
     ),
     3: BASE_AVAILABLE_TOOLS,
 }
@@ -79,6 +80,11 @@ CLUSTER_STABILIZE_SCORE_THRESHOLD = 0.84
 CLUSTER_DESTABILIZE_SCORE_THRESHOLD = 0.72
 CLUSTER_INCIDENT_RELIEF_MULTIPLIER = 0.94
 CLUSTER_OWNER_RELIEF_MULTIPLIER = 0.86
+TASK_QUEUE_MANAGEMENT_WEIGHT: dict[int, float] = {
+    1: 0.0,
+    2: 0.2,
+    3: 0.32,
+}
 
 TASK3_INVESTIGATION_TOOL_PLAN: dict[str, tuple[str, ...]] = {
     "ticket-021": ("lookup_related_ticket", "lookup_requester_history"),
@@ -228,6 +234,8 @@ class HelpdeskTicketRoutingEnvironment(
             incident_slots_remaining=incident_slots_initial,
             planning_penalty_total=0.0,
             capacity_pressure_tickets_resolved=0,
+            cluster_stabilizations_total=0,
+            cluster_destabilizations_total=0,
             ticket_request_info_usage={},
             ticket_defer_counts={},
             open_incident_ticket_ids=[],
@@ -238,6 +246,8 @@ class HelpdeskTicketRoutingEnvironment(
             spawned_follow_up_ticket_ids=[],
             spawned_follow_up_source_ids=[],
             dynamic_queue_events=[],
+            queue_management_score=0.0,
+            queue_management_breakdown={},
         )
 
         return self._build_observation(task)
@@ -292,6 +302,7 @@ class HelpdeskTicketRoutingEnvironment(
             trajectory_reward = None
             trajectory_components = None
             investigation_penalty = self._compute_episode_penalty() if is_done else 0.0
+            rubric_details: dict[str, Any] = {}
             if is_done:
                 trajectory_components = compute_trajectory_adjustments(
                     self._state.per_ticket_scores,
@@ -300,7 +311,9 @@ class HelpdeskTicketRoutingEnvironment(
                     completion_bonus=self._trajectory_consistency_bonus(),
                 )
                 trajectory_reward = trajectory_components["final_reward"]
-                final_reward = self._apply_episode_economics(trajectory_reward)
+                final_reward, rubric_details = self._finalize_terminal_rubric(
+                    trajectory_reward
+                )
                 self._state.total_reward = final_reward
             else:
                 final_reward = clamp_open_unit_interval(0.0)
@@ -329,6 +342,7 @@ class HelpdeskTicketRoutingEnvironment(
                         if trajectory_components is not None
                         else None
                     ),
+                    **rubric_details,
                 },
             )
             self._state.history_entries.append(
@@ -388,6 +402,7 @@ class HelpdeskTicketRoutingEnvironment(
         trajectory_components = None
         investigation_penalty = 0.0
         rubric_reward = None
+        rubric_details: dict[str, Any] = {}
 
         if is_done:
             self._state.per_ticket_scores.append(score)
@@ -403,8 +418,8 @@ class HelpdeskTicketRoutingEnvironment(
                 ),
             )
             trajectory_reward = trajectory_components["final_reward"]
-            rubric_reward = self._apply_episode_economics(
-                trajectory_reward - self._state.planning_penalty_total
+            rubric_reward, rubric_details = self._finalize_terminal_rubric(
+                trajectory_reward
             )
             final_reward = clamp_open_unit_interval(
                 rubric_reward - context_penalty - capacity_penalty - incident_gap_penalty
@@ -434,10 +449,13 @@ class HelpdeskTicketRoutingEnvironment(
                 trajectory_reward = None
                 trajectory_components = None
                 rubric_reward = None
+                rubric_details = {}
                 final_reward = clamp_open_unit_interval(
                     step_reward - context_penalty - capacity_penalty - incident_gap_penalty
                 )
                 self._state.total_reward = 0.0
+                self._state.queue_management_score = 0.0
+                self._state.queue_management_breakdown = {}
         if incident_gap_penalty > 0.0:
             self._state.incident_gap_total = round(
                 self._state.incident_gap_total + incident_gap_penalty,
@@ -503,6 +521,7 @@ class HelpdeskTicketRoutingEnvironment(
                     if trajectory_components is not None
                     else None
                 ),
+                **rubric_details,
             },
         )
         reward_components.update(capacity_details)
@@ -553,16 +572,236 @@ class HelpdeskTicketRoutingEnvironment(
 
     def _apply_episode_economics(self, base_reward: float) -> float:
         penalty = self._compute_episode_penalty()
-        penalty += min(
-            0.25,
-            self._state.sla_breach_count * SLA_BREACH_PENALTY + self._state.incident_gap_total,
-        )
         return clamp_open_unit_interval(base_reward - penalty)
 
     def _current_average_score(self) -> float:
         if not self._state.per_ticket_scores:
             return 0.0
         return sum(self._state.per_ticket_scores) / len(self._state.per_ticket_scores)
+
+    def _queue_management_blend_weight(self, task_id: int | None = None) -> float:
+        resolved_task_id = self._state.current_task_id if task_id is None else task_id
+        return TASK_QUEUE_MANAGEMENT_WEIGHT.get(int(resolved_task_id or 1), 0.0)
+
+    def _context_resolution_score(self) -> float:
+        hidden_context_tickets = [
+            ticket
+            for ticket in self._queue
+            if self._required_tools_for_ticket(ticket, self._state.current_task_id)
+        ]
+        if not hidden_context_tickets:
+            return 1.0
+        total_required = 0
+        total_resolved = 0
+        for ticket in hidden_context_tickets:
+            progress = self._tool_progress_for_ticket(ticket)
+            total_required += max(1, len(progress["required_tools"]))
+            total_resolved += max(
+                0,
+                len(progress["required_tools"]) - len(progress["remaining_tools"]),
+            )
+        return round(
+            max(0.0, min(1.0, total_resolved / max(1, total_required))),
+            4,
+        )
+
+    def _follow_up_containment_score(self) -> float:
+        follow_up_risk_tickets = [
+            ticket
+            for ticket in self._queue
+            if ticket.generated_from_ticket_id is None
+            and (
+                self._requires_incident(ticket)
+                or self._ticket_mentions_follow_up(ticket)
+                or ticket.related_ticket_id is not None
+                or ticket.priority in {"high", "critical"}
+            )
+        ]
+        if not follow_up_risk_tickets:
+            return 1.0
+        spawn_rate = len(self._state.spawned_follow_up_ticket_ids) / max(
+            1,
+            len(follow_up_risk_tickets),
+        )
+        generated_follow_up_scores = [
+            float(entry.get("score", 0.0))
+            for entry in self._state.history_entries
+            if entry.get("generated_from_ticket_id") is not None
+        ]
+        recovery_credit = (
+            sum(generated_follow_up_scores) / len(generated_follow_up_scores)
+            if generated_follow_up_scores
+            else 0.0
+        )
+        score = (1.0 - min(1.0, 0.7 * spawn_rate)) + (
+            min(1.0, spawn_rate) * 0.3 * recovery_credit
+        )
+        return round(max(0.0, min(1.0, score)), 4)
+
+    def _incident_management_score(self) -> float:
+        if (self._state.current_task_id or 1) < 3:
+            return 1.0
+        incident_sensitive_tickets = [
+            ticket
+            for ticket in self._queue
+            if ticket.generated_from_ticket_id is None and self._requires_incident(ticket)
+        ]
+        if not incident_sensitive_tickets:
+            return 1.0
+        coverage_ratio = sum(
+            1 for ticket in incident_sensitive_tickets if self._incident_open_for_ticket(ticket)
+        ) / max(1, len(incident_sensitive_tickets))
+        gap_ratio = min(
+            1.0,
+            self._state.incident_gap_total
+            / max(
+                INCIDENT_GAP_PENALTY,
+                len(incident_sensitive_tickets) * INCIDENT_GAP_PENALTY,
+            ),
+        )
+        score = (0.65 * (1.0 - gap_ratio)) + (0.35 * coverage_ratio)
+        return round(max(0.0, min(1.0, score)), 4)
+
+    def _sla_quality_score(self) -> float:
+        breach_denominator = max(1, self._state.deferred_ticket_count or len(self._queue))
+        breach_ratio = min(1.0, self._state.sla_breach_count / breach_denominator)
+        score = 1.0 - breach_ratio
+        return round(max(0.0, min(1.0, score)), 4)
+
+    def _planning_quality_score(self) -> float:
+        if (self._state.current_task_id or 1) < 3:
+            return 1.0
+        capacity_sensitive_count = sum(
+            1 for ticket in self._queue if self._ticket_has_alternate_route(ticket)
+        )
+        route_coverage = (
+            min(
+                1.0,
+                self._state.capacity_pressure_tickets_resolved / capacity_sensitive_count,
+            )
+            if capacity_sensitive_count
+            else 1.0
+        )
+        max_expected_penalty = max(
+            0.12,
+            len(self._queue)
+            * (
+                TEAM_CAPACITY_OVERFLOW_PENALTY
+                + HIGH_PRIORITY_SLOT_OVERFLOW_PENALTY
+                + ESCALATION_SLOT_OVERFLOW_PENALTY
+            ),
+        )
+        penalty_score = 1.0 - min(
+            1.0,
+            self._state.planning_penalty_total / max_expected_penalty,
+        )
+        score = (0.6 * penalty_score) + (0.4 * route_coverage)
+        return round(max(0.0, min(1.0, score)), 4)
+
+    def _cluster_coordination_score(self) -> float:
+        if (self._state.current_task_id or 1) < 2:
+            return 1.0
+        clustered_tickets = [
+            ticket
+            for ticket in self._queue
+            if ticket.service_cluster_id
+            or ticket.related_ticket_id is not None
+            or ticket.generated_from_ticket_id is not None
+            or self._ticket_repeated_requester_count(ticket) >= 2
+        ]
+        if not clustered_tickets:
+            return 1.0
+        cluster_count = max(1, len(clustered_tickets))
+        destabilization_ratio = min(
+            1.0,
+            self._state.cluster_destabilizations_total / cluster_count,
+        )
+        stabilization_ratio = min(
+            1.0,
+            self._state.cluster_stabilizations_total / cluster_count,
+        )
+        score = 1.0 - (0.75 * destabilization_ratio) + (0.25 * stabilization_ratio)
+        return round(max(0.0, min(1.0, score)), 4)
+
+    def _queue_management_breakdown(self, trajectory_reward: float) -> tuple[float, dict[str, Any]]:
+        task_id = int(self._state.current_task_id or 1)
+        if task_id < 2:
+            proxy_score = round(clamp_open_unit_interval(trajectory_reward), 4)
+            return proxy_score, {"routing_trajectory_proxy": proxy_score}
+
+        component_scores: dict[str, float] = {
+            "context_resolution": self._context_resolution_score(),
+            "cluster_coordination": self._cluster_coordination_score(),
+            "follow_up_containment": self._follow_up_containment_score(),
+            "sla_management": self._sla_quality_score(),
+        }
+        if task_id >= 3:
+            component_scores["planning_quality"] = self._planning_quality_score()
+            component_scores["incident_management"] = self._incident_management_score()
+            component_weights = {
+                "context_resolution": 0.2,
+                "planning_quality": 0.24,
+                "incident_management": 0.2,
+                "cluster_coordination": 0.16,
+                "follow_up_containment": 0.12,
+                "sla_management": 0.08,
+            }
+        else:
+            component_weights = {
+                "context_resolution": 0.38,
+                "cluster_coordination": 0.26,
+                "follow_up_containment": 0.2,
+                "sla_management": 0.16,
+            }
+
+        aggregate_score = round(
+            sum(
+                component_scores[name] * weight
+                for name, weight in component_weights.items()
+            ),
+            4,
+        )
+        breakdown: dict[str, Any] = {
+            name: round(score, 4) for name, score in component_scores.items()
+        }
+        breakdown["weights"] = {
+            name: round(weight, 4) for name, weight in component_weights.items()
+        }
+        breakdown["cluster_stabilizations_total"] = self._state.cluster_stabilizations_total
+        breakdown["cluster_destabilizations_total"] = self._state.cluster_destabilizations_total
+        breakdown["spawned_follow_up_count"] = len(self._state.spawned_follow_up_ticket_ids)
+        breakdown["sla_breach_count"] = self._state.sla_breach_count
+        breakdown["planning_penalty_total"] = round(self._state.planning_penalty_total, 4)
+        breakdown["incident_gap_total"] = round(self._state.incident_gap_total, 4)
+        breakdown["aggregate"] = aggregate_score
+        return aggregate_score, breakdown
+
+    def _finalize_terminal_rubric(
+        self,
+        trajectory_reward: float,
+    ) -> tuple[float, dict[str, Any]]:
+        task_id = int(self._state.current_task_id or 1)
+        queue_management_score, queue_management_breakdown = self._queue_management_breakdown(
+            trajectory_reward
+        )
+        route_weight = round(1.0 - self._queue_management_blend_weight(task_id), 4)
+        queue_weight = round(self._queue_management_blend_weight(task_id), 4)
+        blended_reward = clamp_open_unit_interval(
+            (route_weight * trajectory_reward) + (queue_weight * queue_management_score)
+        )
+        episode_economics_penalty = round(self._compute_episode_penalty(), 4)
+        rubric_reward = self._apply_episode_economics(blended_reward)
+        self._state.queue_management_score = queue_management_score
+        self._state.queue_management_breakdown = dict(queue_management_breakdown)
+        return rubric_reward, {
+            "trajectory_routing_reward": trajectory_reward,
+            "queue_management_score": queue_management_score,
+            "queue_management_breakdown": dict(queue_management_breakdown),
+            "route_objective_weight": route_weight,
+            "queue_management_weight": queue_weight,
+            "blended_objective_before_economics": blended_reward,
+            "episode_economics_penalty": episode_economics_penalty,
+        }
 
     def _available_action_types_for_task(self, task_id: int | None = None) -> list[str]:
         resolved_task_id = self._state.current_task_id if task_id is None else task_id
@@ -595,7 +834,7 @@ class HelpdeskTicketRoutingEnvironment(
     def _sample_queue(self, task_id: int, queue_size: int) -> list[HelpdeskTicketRecord]:
         if queue_size <= 0:
             return []
-        if task_id != 3 or queue_size < 3:
+        if task_id not in {2, 3} or queue_size < 3:
             return self._rng.sample(self._dataset, queue_size)
 
         cluster_groups = self._cluster_sample_groups()
@@ -671,15 +910,27 @@ class HelpdeskTicketRoutingEnvironment(
                 indexes.append(index)
         return indexes
 
+    def _ticket_queue_index(self, ticket: HelpdeskTicketRecord) -> int | None:
+        for index, candidate in enumerate(self._queue):
+            if candidate.ticket_id == ticket.ticket_id:
+                return index
+        return None
+
     def _cluster_summary(
         self,
         ticket: HelpdeskTicketRecord,
         *,
         start_index: int | None = None,
     ) -> dict[str, Any]:
-        effective_start = (
-            self._state.current_ticket_index + 1 if start_index is None else start_index
-        )
+        if start_index is None:
+            ticket_index = self._ticket_queue_index(ticket)
+            effective_start = (
+                ticket_index + 1
+                if ticket_index is not None
+                else self._state.current_ticket_index + 1
+            )
+        else:
+            effective_start = start_index
         future_indexes = self._future_cluster_ticket_indexes(
             ticket,
             start_index=effective_start,
@@ -722,7 +973,7 @@ class HelpdeskTicketRoutingEnvironment(
         context_penalty: float,
         incident_gap_penalty: float,
     ) -> list[str]:
-        if self._state.current_task_id != 3:
+        if (self._state.current_task_id or 1) < 2:
             return []
         if score < CLUSTER_STABILIZE_SCORE_THRESHOLD:
             return []
@@ -791,6 +1042,7 @@ class HelpdeskTicketRoutingEnvironment(
             updated_ticket_ids.append(updated_ticket.ticket_id)
 
         if updated_ticket_ids:
+            self._state.cluster_stabilizations_total += len(updated_ticket_ids)
             self._record_dynamic_queue_event(
                 "stabilize_cluster",
                 source_ticket_id=current_ticket.ticket_id,
@@ -807,7 +1059,7 @@ class HelpdeskTicketRoutingEnvironment(
         context_penalty: float,
         incident_gap_penalty: float,
     ) -> list[str]:
-        if self._state.current_task_id != 3:
+        if (self._state.current_task_id or 1) < 2:
             return []
         if score >= CLUSTER_DESTABILIZE_SCORE_THRESHOLD:
             if context_penalty <= 0.0 and incident_gap_penalty <= 0.0:
@@ -850,6 +1102,7 @@ class HelpdeskTicketRoutingEnvironment(
             updated_ticket_ids.append(updated_ticket.ticket_id)
 
         if updated_ticket_ids:
+            self._state.cluster_destabilizations_total += len(updated_ticket_ids)
             self._record_dynamic_queue_event(
                 "destabilize_cluster",
                 source_ticket_id=current_ticket.ticket_id,
@@ -1431,17 +1684,27 @@ class HelpdeskTicketRoutingEnvironment(
         context_penalty: float,
         incident_gap_penalty: float,
     ) -> bool:
-        if self._state.current_task_id != 3:
+        task_id = int(self._state.current_task_id or 1)
+        if task_id < 2:
             return False
         if ticket.generated_from_ticket_id is not None:
             return False
         if ticket.ticket_id in self._state.spawned_follow_up_source_ids:
             return False
-        if not (
+        follow_up_risk = (
             self._requires_incident(ticket)
             or self._ticket_mentions_follow_up(ticket)
             or ticket.related_ticket_id is not None
             or ticket.priority in {"high", "critical"}
+            or self._cluster_summary(ticket)["future_cluster_ticket_count"] > 0
+        )
+        if not follow_up_risk:
+            return False
+        if task_id == 2 and not (
+            ticket.related_ticket_id is not None
+            or self._ticket_mentions_follow_up(ticket)
+            or self._cluster_summary(ticket)["future_cluster_ticket_count"] > 0
+            or self._ticket_repeated_requester_count(ticket) >= 2
         ):
             return False
         return (
@@ -1527,7 +1790,7 @@ class HelpdeskTicketRoutingEnvironment(
                 or self._future_queue_demand()["remaining_ticket_count"] > 0
             )
         if tool_name == "lookup_queue_cluster_summary":
-            if self._state.current_task_id != 3:
+            if (self._state.current_task_id or 1) < 2:
                 return False
             cluster_summary = self._cluster_summary(ticket)
             return (
@@ -1569,10 +1832,16 @@ class HelpdeskTicketRoutingEnvironment(
             and "lookup_queue_capacity_forecast" not in required_tools
         ):
             required_tools.append("lookup_queue_capacity_forecast")
+        ticket_index = self._ticket_queue_index(ticket)
+        cluster_start_index = (
+            ticket_index + 1
+            if ticket_index is not None
+            else self._state.current_ticket_index + 1
+        )
         if resolved_task_id == 3:
             cluster_summary = self._cluster_summary(
                 ticket,
-                start_index=self._state.current_ticket_index + 1,
+                start_index=cluster_start_index,
             )
             if (
                 cluster_summary["future_cluster_ticket_count"] > 0
@@ -1581,6 +1850,21 @@ class HelpdeskTicketRoutingEnvironment(
                     self._requires_incident(ticket)
                     or cluster_summary["future_high_priority_count"] > 0
                     or cluster_summary["shared_requester_count"] > 1
+                )
+            ):
+                required_tools.append("lookup_queue_cluster_summary")
+        if resolved_task_id == 2:
+            cluster_summary = self._cluster_summary(
+                ticket,
+                start_index=cluster_start_index,
+            )
+            if (
+                cluster_summary["future_cluster_ticket_count"] > 0
+                and "lookup_queue_cluster_summary" not in required_tools
+                and (
+                    ticket.related_ticket_id is not None
+                    or cluster_summary["shared_requester_count"] > 1
+                    or self._ticket_mentions_follow_up(ticket)
                 )
             ):
                 required_tools.append("lookup_queue_cluster_summary")
@@ -2316,6 +2600,10 @@ class HelpdeskTicketRoutingEnvironment(
         used_tools = set(self._used_tools_for_ticket(ticket.ticket_id))
         operational_actions = progress["recommended_operational_actions"]
         cluster_summary = self._cluster_summary(ticket)
+        cluster_hint = (
+            cluster_summary["future_cluster_ticket_count"] > 0
+            or cluster_summary["shared_requester_count"] > 1
+        )
         ticket_view: dict[str, Any] = {
             "ticket_id": ticket.ticket_id,
             "title": self._visible_title(ticket),
@@ -2341,12 +2629,19 @@ class HelpdeskTicketRoutingEnvironment(
             "incident_recommended": self._requires_incident(ticket),
             "incident_open": self._incident_open_for_ticket(ticket),
             "recommended_actions": operational_actions,
-            "service_cluster_id": ticket.service_cluster_id,
-            "future_cluster_ticket_count": cluster_summary["future_cluster_ticket_count"],
-            "future_cluster_ticket_ids": cluster_summary["future_cluster_ticket_ids"],
-            "shared_requester_count": cluster_summary["shared_requester_count"],
-            "active_incident_cover": cluster_summary["active_incident_cover"],
+            "cluster_coordination_hint": cluster_hint,
+            "shared_requester_pressure": cluster_summary["shared_requester_count"] > 1,
         }
+        if "lookup_queue_cluster_summary" in used_tools:
+            ticket_view["operational_context"].update(
+                {
+                    "service_cluster_id": ticket.service_cluster_id,
+                    "future_cluster_ticket_count": cluster_summary["future_cluster_ticket_count"],
+                    "future_cluster_ticket_ids": cluster_summary["future_cluster_ticket_ids"],
+                    "shared_requester_count": cluster_summary["shared_requester_count"],
+                    "active_incident_cover": cluster_summary["active_incident_cover"],
+                }
+            )
         if ticket.ambiguity_note is not None and "lookup_internal_routing_note" not in remaining_tools:
             ticket_view["ambiguity_note"] = ticket.ambiguity_note
         if (
@@ -2444,6 +2739,9 @@ class HelpdeskTicketRoutingEnvironment(
             incident_gap_penalty = reward_components.get("incident_gap_penalty")
             if incident_gap_penalty:
                 parts.append(f"incident_gap_penalty={incident_gap_penalty:.2f}")
+            queue_management_score = reward_components.get("queue_management_score")
+            if queue_management_score is not None:
+                parts.append(f"queue_management_score={queue_management_score:.2f}")
             spawned_follow_up_ticket_id = reward_components.get("spawned_follow_up_ticket_id")
             if spawned_follow_up_ticket_id:
                 parts.append(f"spawned_follow_up={spawned_follow_up_ticket_id}")
@@ -2493,11 +2791,21 @@ class HelpdeskTicketRoutingEnvironment(
                 "defer_count": self._defer_count(ticket.ticket_id),
                 "incident_open": self._incident_open_for_ticket(ticket),
                 "recommended_actions": progress["recommended_operational_actions"],
-                "service_cluster_id": ticket.service_cluster_id,
-                "future_cluster_ticket_count": cluster_summary["future_cluster_ticket_count"],
-                "active_incident_cover": cluster_summary["active_incident_cover"],
+                "cluster_coordination_hint": (
+                    cluster_summary["future_cluster_ticket_count"] > 0
+                    or cluster_summary["shared_requester_count"] > 1
+                ),
             },
         }
+        if "lookup_queue_cluster_summary" in self._used_tools_for_ticket(ticket.ticket_id):
+            history_entry["operational_context"].update(
+                {
+                    "service_cluster_id": ticket.service_cluster_id,
+                    "future_cluster_ticket_count": cluster_summary["future_cluster_ticket_count"],
+                    "active_incident_cover": cluster_summary["active_incident_cover"],
+                    "shared_requester_count": cluster_summary["shared_requester_count"],
+                }
+            )
         if self._state.current_task_id == 3:
             history_entry["capacity_state"] = self._capacity_state_snapshot()
         if reward is not None:
@@ -2610,12 +2918,13 @@ class HelpdeskTicketRoutingEnvironment(
             "planning_penalty_applied": self._state.planning_penalty_applied,
             "sla_breach_count": self._state.sla_breach_count,
             "incident_gap_total": self._state.incident_gap_total,
+            "queue_management_score": self._state.queue_management_score,
+            "queue_management_breakdown": dict(self._state.queue_management_breakdown),
             "dynamic_queue_events": list(self._state.dynamic_queue_events[-5:]),
             "clustered_follow_ons": self._future_queue_demand().get("clustered_follow_ons", 0),
         }
         if self._state.current_task_id == 3:
             metadata["capacity_state"] = self._capacity_state_snapshot()
-            metadata["future_queue_demand"] = self._future_queue_demand()
         if last_history_entry is not None:
             metadata["last_score"] = last_history_entry.get("score")
             metadata["last_reward"] = last_history_entry.get("reward")

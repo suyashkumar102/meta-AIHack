@@ -249,6 +249,7 @@ def _routing_text(ticket: dict[str, Any]) -> str:
         json.dumps(ticket.get("last_tool_result") or {}, sort_keys=True),
         json.dumps(ticket.get("routing_options") or [], sort_keys=True),
         json.dumps(ticket.get("operational_context") or {}, sort_keys=True),
+        json.dumps(ticket.get("cluster_summary") or {}, sort_keys=True),
         json.dumps(ticket.get("capacity_state") or {}, sort_keys=True),
         json.dumps(ticket.get("future_queue_demand") or {}, sort_keys=True),
     ]
@@ -284,8 +285,11 @@ def infer_ticket_cue(ticket: dict[str, Any]) -> str:
     ):
         return "capacity_planning"
     if (
-        int((ticket.get("operational_context") or {}).get("future_cluster_ticket_count", 0) or 0)
+        bool((ticket.get("operational_context") or {}).get("cluster_coordination_hint"))
+        or int((ticket.get("cluster_summary") or {}).get("future_cluster_ticket_count", 0) or 0)
         > 0
+        or int((ticket.get("cluster_summary") or {}).get("shared_requester_count", 0) or 0)
+        > 1
         or any(
             phrase in text
             for phrase in (
@@ -471,6 +475,43 @@ def choose_operational_action(
     return None, None
 
 
+def merge_ticket_context(
+    ticket: dict[str, Any],
+    observation: HelpdeskTicketObservation,
+) -> dict[str, Any]:
+    merged_ticket = dict(ticket)
+    if getattr(observation, "last_tool_result", None) is not None:
+        merged_ticket["last_tool_result"] = observation.last_tool_result
+        if observation.last_tool_result.get("tool_name") == "lookup_queue_capacity_forecast":
+            if observation.last_tool_result.get("future_queue_demand") is not None:
+                merged_ticket["future_queue_demand"] = observation.last_tool_result[
+                    "future_queue_demand"
+                ]
+            if observation.last_tool_result.get("capacity_state") is not None:
+                merged_ticket["capacity_state"] = observation.last_tool_result[
+                    "capacity_state"
+                ]
+    merged_ticket["recent_history"] = list(getattr(observation, "history", []) or [])
+    merged_ticket["queue_position"] = getattr(observation, "queue_position", None)
+    merged_ticket["tickets_remaining"] = getattr(observation, "tickets_remaining", None)
+    merged_ticket["tickets_after_current"] = getattr(observation, "tickets_after_current", None)
+    merged_ticket["available_tools"] = list(getattr(observation, "available_tools", []) or [])
+    merged_ticket["available_action_types"] = list(
+        getattr(observation, "available_action_types", []) or []
+    )
+    merged_ticket["last_reward_components"] = dict(
+        getattr(observation, "last_reward_components", {}) or {}
+    )
+    observation_metadata = getattr(observation, "metadata", {}) or {}
+    if observation_metadata.get("last_feedback_summary"):
+        merged_ticket["feedback_summary"] = observation_metadata["last_feedback_summary"]
+    if observation_metadata.get("capacity_state") is not None:
+        merged_ticket["capacity_state"] = observation_metadata["capacity_state"]
+    if observation_metadata.get("future_queue_demand") is not None:
+        merged_ticket["future_queue_demand"] = observation_metadata["future_queue_demand"]
+    return merged_ticket
+
+
 def choose_policy_action(
     policy: PolicyConfig,
     observation: HelpdeskTicketObservation,
@@ -480,7 +521,7 @@ def choose_policy_action(
     used_tools_by_ticket: dict[str, set[str]] | None = None,
     adaptive_bandit: AdaptiveToolBandit | None = None,
 ) -> tuple[HelpdeskTicketAction, str, str | None]:
-    ticket = observation.current_ticket or {}
+    ticket = merge_ticket_context(observation.current_ticket or {}, observation)
     ticket_id = str(ticket.get("ticket_id", ""))
     ticket_investigations = investigations_by_ticket.get(ticket_id, 0)
     used_tools = set()
@@ -588,7 +629,7 @@ def rollout_episode(
     trajectories: list[dict[str, Any]] = []
 
     while not observation.done:
-        ticket = observation.current_ticket or {}
+        ticket = merge_ticket_context(observation.current_ticket or {}, observation)
         ticket_id = str(ticket.get("ticket_id", ""))
         action, action_source, action_cue = choose_policy_action(
             policy,
@@ -660,6 +701,7 @@ def rollout_episode(
         "terminal_reward": terminal_reward,
         "terminal_rubric_reward": terminal_rubric_reward,
         "average_ticket_score": env.state.average_score_so_far,
+        "queue_management_score": env.state.queue_management_score,
         "planning_penalty_total": env.state.planning_penalty_total,
         "capacity_pressure_tickets_resolved": env.state.capacity_pressure_tickets_resolved,
         "per_ticket_scores": list(env.state.per_ticket_scores),
@@ -700,6 +742,9 @@ def summarize_policy_episodes(
             "avg_terminal_rubric_reward": _safe_mean(
                 [float(episode["terminal_rubric_reward"]) for episode in task_episodes]
             ),
+            "avg_queue_management_score": _safe_mean(
+                [float(episode["queue_management_score"]) for episode in task_episodes]
+            ),
             "avg_planning_penalty_total": _safe_mean(
                 [float(episode["planning_penalty_total"]) for episode in task_episodes]
             ),
@@ -729,6 +774,9 @@ def summarize_policy_episodes(
         ),
         "avg_terminal_rubric_reward": _safe_mean(
             [float(episode["terminal_rubric_reward"]) for episode in episode_summaries]
+        ),
+        "avg_queue_management_score": _safe_mean(
+            [float(episode["queue_management_score"]) for episode in episode_summaries]
         ),
         "avg_planning_penalty_total": _safe_mean(
             [float(episode["planning_penalty_total"]) for episode in episode_summaries]
@@ -788,9 +836,10 @@ def evaluate_policy(
     return result
 
 
-def _selection_tuple(summary: dict[str, Any]) -> tuple[float, float, float, float, float]:
+def _selection_tuple(summary: dict[str, Any]) -> tuple[float, float, float, float, float, float]:
     return (
         float(summary["avg_terminal_rubric_reward"]),
+        float(summary["avg_queue_management_score"]),
         -float(summary["avg_planning_penalty_total"]),
         float(summary["avg_episode_return"]),
         float(summary["avg_normalized_return"]),
@@ -849,7 +898,9 @@ def compare_policies(
         "mode": "compare",
         "task_ids": task_ids,
         "seeds": seeds,
-        "selection_metric": "avg_terminal_rubric_reward_then_lower_planning_penalty",
+        "selection_metric": (
+            "avg_terminal_rubric_reward_then_queue_management_then_lower_planning_penalty"
+        ),
         "baseline_policy": baseline_run["policy"],
         "best_policy": best_run["policy"],
         "improvement_vs_baseline": {
@@ -866,6 +917,11 @@ def compare_policies(
                 best_run["summary"],
                 baseline_run["summary"],
                 "avg_terminal_rubric_reward",
+            ),
+            "avg_queue_management_score": _delta(
+                best_run["summary"],
+                baseline_run["summary"],
+                "avg_queue_management_score",
             ),
             "avg_planning_penalty_total": _delta(
                 best_run["summary"],
@@ -966,7 +1022,9 @@ def search_policies(
         "task_ids": task_ids,
         "train_seeds": train_seeds,
         "eval_seeds": eval_seeds,
-        "selection_metric": "avg_terminal_rubric_reward_then_lower_planning_penalty",
+        "selection_metric": (
+            "avg_terminal_rubric_reward_then_queue_management_then_lower_planning_penalty"
+        ),
         "candidate_policies": [policy.name for policy in candidate_policies],
         "selected_policy": selected_policy.name,
         "baseline_policy": baseline_policy.name,
@@ -996,6 +1054,11 @@ def search_policies(
                 eval_selected["summary"],
                 eval_baseline["summary"],
                 "avg_terminal_rubric_reward",
+            ),
+            "avg_queue_management_score": _delta(
+                eval_selected["summary"],
+                eval_baseline["summary"],
+                "avg_queue_management_score",
             ),
             "avg_planning_penalty_total": _delta(
                 eval_selected["summary"],

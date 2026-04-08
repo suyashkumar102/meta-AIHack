@@ -65,7 +65,7 @@ The environment classes and vocabulary are intentionally frozen to keep collabor
 
 ## Lightweight Policy Improvement Loop
 
-The repo includes a local policy runner in `policy_learning.py`. It still does not update model weights, but it now does more than cosmetic search: it evaluates repeated seeded rollouts, learns cue-conditioned tool preferences for investigation, uses the same planning-aware deterministic submit logic as `inference.py`, and ranks policies by terminal rubric reward first, with lower planning penalty as the tie-breaker.
+The repo includes a local policy runner in `policy_learning.py`. It still does not update model weights, but it now does more than cosmetic search: it evaluates repeated seeded rollouts, learns cue-conditioned tool preferences for investigation, uses the same planning-aware deterministic submit logic as `inference.py`, and ranks policies by terminal rubric reward first, then queue-management quality, with lower planning penalty as the next tie-breaker.
 
 That gives the project a meaningful improvement loop for judge demos:
 
@@ -99,7 +99,7 @@ The default submit policy inside this runner stays deterministic and local. It r
 | ID | Name | Difficulty | Required Fields | What The Agent Must Do |
 |----|------|------------|-----------------|-------------------------|
 | 1 | Guided Full Routing | Easy | `issue_type`, `priority`, `assignment_group`, `resolution_action` | route a mostly visible ticket correctly |
-| 2 | Contextual Full Routing | Medium | `issue_type`, `priority`, `assignment_group`, `resolution_action` | route under partial observability with investigation and clarification |
+| 2 | Contextual Full Routing | Medium | `issue_type`, `priority`, `assignment_group`, `resolution_action` | route under partial observability with investigation, clarification, and moderate queue carry-over |
 | 3 | Adaptive Queue Routing | Hard | `issue_type`, `priority`, `assignment_group`, `resolution_action` | route while managing queue pressure, incidents, clustered follow-ons, deferrals, and downstream follow-ups |
 
 ## Locked Vocabulary
@@ -158,6 +158,7 @@ Visible ticket fields:
 - optional `routing_options`
 - optional `capacity_state`
 - optional `operational_context`
+- optional `cluster_summary`
 - optional `generated_from_ticket_id`
 
 Each observation also includes:
@@ -181,7 +182,7 @@ Each observation also includes:
 - `last_reward_components`
 - `rubric_reward` on terminal observations
 - `metadata.last_feedback_summary` for compact reward / penalty feedback
-- `metadata.capacity_state` and `metadata.future_queue_demand` on hard-task episodes
+- `metadata.capacity_state` on hard-task episodes
 - `metadata.planning_penalty_total` and `metadata.planning_penalty_applied`
 - standard OpenEnv fields such as `done` and `reward`
 
@@ -204,6 +205,8 @@ The internal `HelpdeskTicketState` tracks:
 - `planning_penalty_total`
 - `incident_gap_total`
 - `sla_breach_count`
+- `queue_management_score`
+- `queue_management_breakdown`
 - `dynamic_queue_events`
 
 ## Grading And Reward
@@ -232,6 +235,7 @@ Hard-task investigation behavior:
 - linked-ticket previews and internal routing notes stay hidden until the matching tool is used
 - capacity-sensitive tickets can expose queue pressure, future demand, and alternate routing options through `lookup_queue_capacity_forecast`
 - cluster-sensitive tickets can expose future related tickets, shared-requester load, and active incident coverage through `lookup_queue_cluster_summary`
+- detailed cluster counts and future queue-demand breakdowns stay hidden until the matching queue tool is used
 - only useful investigation steps return a small positive shaping reward
 - blind or repeated probing does not pay by default
 - premature hard-task submission can incur a shaping penalty even when the visible text looks plausible
@@ -260,7 +264,7 @@ Task weights:
 Final episode rubric reward is queue-based:
 
 ```text
-clamp(average(per_ticket_scores) + trajectory bonuses - planning penalties - extra investigation penalties)
+clamp(route_trajectory_reward * route_weight + queue_management_score * queue_weight - extra investigation penalties)
 ```
 
 Both `reward` and `rubric_reward` now use the closed interval `[0.0, 1.0]`.
@@ -273,6 +277,7 @@ To make the environment more RL-friendly, each observation now also surfaces str
 
 - `last_reward_components` exposes ticket score, shaped step reward, milestone adjustment, trajectory reward when applicable, and any investigation penalty applied
 - `average_score_so_far` and `progress_fraction` expose trajectory progress without leaking future labels
+- medium and hard telemetry now also exposes terminal `queue_management_score` plus a queue-management breakdown
 - hard-task telemetry includes planning penalties, capacity usage, and the post-action capacity snapshot
 - `history` retains the same reward components plus a compact `feedback_summary` string for downstream agents
 

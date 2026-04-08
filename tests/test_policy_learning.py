@@ -209,6 +209,8 @@ class PolicyLearningTests(unittest.TestCase):
 
         self.assertEqual(report["best_policy"], "adaptive_cue_bandit")
         self.assertGreater(report["improvement_vs_baseline"]["avg_terminal_reward"], 0.0)
+        self.assertIn("avg_queue_management_score", report["improvement_vs_baseline"])
+        self.assertIn("avg_queue_management_score", report["policy_summaries"][0])
 
     def test_infer_ticket_cue_distinguishes_workflow_blocker(self) -> None:
         cue = infer_ticket_cue(

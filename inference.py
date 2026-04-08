@@ -581,6 +581,7 @@ def build_routing_text(ticket: dict) -> str:
     last_tool_result = ticket.get("last_tool_result") or {}
     routing_options = ticket.get("routing_options") or []
     operational_context = ticket.get("operational_context") or {}
+    cluster_summary = ticket.get("cluster_summary") or {}
     return " ".join(
         [
             ticket.get("title", ""),
@@ -593,6 +594,7 @@ def build_routing_text(ticket: dict) -> str:
             json.dumps(last_tool_result, sort_keys=True),
             json.dumps(routing_options, sort_keys=True),
             json.dumps(operational_context, sort_keys=True),
+            json.dumps(cluster_summary, sort_keys=True),
             json.dumps(ticket.get("capacity_state") or {}, sort_keys=True),
             json.dumps(ticket.get("future_queue_demand") or {}, sort_keys=True),
         ]
@@ -1013,9 +1015,11 @@ def should_investigate(
         )
     )
     operational_context = ticket.get("operational_context") or {}
+    cluster_summary = ticket.get("cluster_summary") or {}
     cluster_signal = (
-        int(operational_context.get("future_cluster_ticket_count", 0) or 0) > 0
-        or int(operational_context.get("shared_requester_count", 0) or 0) > 1
+        bool(operational_context.get("cluster_coordination_hint"))
+        or int(cluster_summary.get("future_cluster_ticket_count", 0) or 0) > 0
+        or int(cluster_summary.get("shared_requester_count", 0) or 0) > 1
         or any(
             phrase in routing_text
             for phrase in (
@@ -1103,6 +1107,15 @@ def merge_ticket_context(ticket: dict, observation: Any) -> dict:
     merged_ticket = dict(ticket)
     if getattr(observation, "last_tool_result", None) is not None:
         merged_ticket["last_tool_result"] = observation.last_tool_result
+        if observation.last_tool_result.get("tool_name") == "lookup_queue_capacity_forecast":
+            if observation.last_tool_result.get("future_queue_demand") is not None:
+                merged_ticket["future_queue_demand"] = observation.last_tool_result[
+                    "future_queue_demand"
+                ]
+            if observation.last_tool_result.get("capacity_state") is not None:
+                merged_ticket["capacity_state"] = observation.last_tool_result[
+                    "capacity_state"
+                ]
     merged_ticket["recent_history"] = list(getattr(observation, "history", []))
     merged_ticket["queue_position"] = getattr(observation, "queue_position", None)
     merged_ticket["tickets_remaining"] = getattr(observation, "tickets_remaining", None)

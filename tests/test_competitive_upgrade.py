@@ -729,6 +729,8 @@ class TestInvestigationActions(unittest.TestCase):
 
     def test_queue_cluster_summary_reveals_future_cluster_load(self) -> None:
         env, obs, root, follow_up = self._make_cluster_env()
+        self.assertNotIn("future_cluster_ticket_count", obs.current_ticket["operational_context"])
+        self.assertTrue(obs.current_ticket["operational_context"]["cluster_coordination_hint"])
 
         obs = env.step(
             HelpdeskTicketAction(
@@ -776,7 +778,7 @@ class TestInvestigationActions(unittest.TestCase):
 
         self.assertFalse(obs.done)
         self.assertEqual(obs.current_ticket["ticket_id"], follow_up.ticket_id)
-        self.assertTrue(obs.current_ticket["operational_context"]["active_incident_cover"])
+        self.assertTrue(obs.current_ticket["operational_context"]["incident_open"])
         self.assertIn(
             follow_up.ticket_id,
             obs.history[-1]["reward_components"]["cluster_stabilized_ticket_ids"],
@@ -838,6 +840,56 @@ class TestInvestigationActions(unittest.TestCase):
             final_obs.last_reward_components.get("context_gap_penalty", 0.0),
             0.0,
         )
+
+    def test_terminal_rubric_reports_queue_management_score(self) -> None:
+        from unittest.mock import patch
+
+        dataset = load_dataset()
+        ticket = next((t for t in dataset if t.ticket_id == "TKT-NONDEFAULT-003"), None)
+        self.assertIsNotNone(ticket)
+
+        env = _make_env()
+        with patch.object(env, "_dataset", [ticket]):
+            with patch.object(env, "_tickets_by_id", {ticket.ticket_id: ticket}):
+                obs = env.reset(seed=0, task_id=3, queue_size=1)
+
+        final_obs = env.step(
+            HelpdeskTicketAction(
+                issue_type=ticket.issue_type,
+                priority=ticket.priority,
+                assignment_group=ticket.assignment_group,
+                resolution_action=ticket.resolution_action,
+            )
+        )
+
+        self.assertTrue(final_obs.done)
+        self.assertIn("queue_management_score", final_obs.last_reward_components)
+        self.assertIn("queue_management_breakdown", final_obs.last_reward_components)
+        self.assertIn("context_resolution", final_obs.last_reward_components["queue_management_breakdown"])
+
+    def test_capacity_forecast_hides_future_demand_until_tool_use(self) -> None:
+        from unittest.mock import patch
+
+        dataset = load_dataset()
+        ticket = next(
+            (t for t in dataset if t.alternate_route_score_multiplier > 0.0),
+            None,
+        )
+        self.assertIsNotNone(ticket)
+
+        env = _make_env()
+        with patch.object(env, "_dataset", [ticket]):
+            with patch.object(env, "_tickets_by_id", {ticket.ticket_id: ticket}):
+                obs = env.reset(seed=0, task_id=3, queue_size=1)
+
+        self.assertNotIn("future_queue_demand", obs.metadata)
+        obs = env.step(
+            HelpdeskTicketAction(
+                action_type="investigate",
+                tool_name="lookup_queue_capacity_forecast",
+            )
+        )
+        self.assertIn("future_queue_demand", obs.last_tool_result)
 
 
 class TestQueueEconomics(unittest.TestCase):

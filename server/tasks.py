@@ -29,9 +29,11 @@ TASKS = {
         "name": "Contextual Full Routing",
         "difficulty": "medium",
         "instructions": (
-            "Perform full helpdesk routing with partial observability. Some "
-            "tickets hide related-case, requester-history, or clarification "
-            "details until you investigate or request more information."
+            "Perform full helpdesk routing with partial observability and moderate "
+            "queue carry-over. Some tickets hide related-case, requester-history, "
+            "or cluster-coordination details until you investigate or request more "
+            "information, and medium episodes can also require deferral or coherent "
+            "handling across linked tickets in the same queue."
         ),
         "allowed_fields": [
             "issue_type",
