@@ -1,424 +1,628 @@
-# IT Helpdesk Ticket Routing OpenEnv - Knowledge Guide
+# IT Helpdesk Ticket Routing OpenEnv - Mentor Guide
 
-## What This Repo Needs To Prove
+This document is written as if I am mentoring someone who only knows basic Python and wants to understand how to build this project well.
 
-The judges want a real-world environment that follows the OpenEnv pattern and can be understood quickly.
-
-That means this repo needs:
+The goal is not to teach every code detail. The goal is to explain the real-world thinking behind the project so you understand what you are building, why each piece exists, and how all the parts fit together.
 
-1. typed action, observation, and state models
-2. working `reset()`, `step()`, and `state()`
-3. at least three difficulty levels
-4. deterministic grading
-5. meaningful reward shaping
-6. a baseline `inference.py`
-7. Docker and metadata that are easy to rerun
+## Start With The Big Picture
 
-## Why This Domain Fits
+This project is a small simulation of an IT helpdesk team.
 
-IT helpdesk routing is a strong hackathon fit because it is:
+A company receives support tickets like:
 
-- realistic
-- structured
-- judge-friendly
-- deterministic to grade
-- naturally multi-step
+- "I was charged twice after the integration outage"
+- "My admin account is locked and I cannot access payroll"
+- "Can we extend this contractor account for two more weeks?"
+- "We think this email is a phishing attempt"
 
-A helpdesk agent has to decide what the ticket is about, how urgent it is, who should own it, and what should happen next. The current runtime now supports a small two-mode action object: investigate first when needed, then submit the final routing answer.
+A human helpdesk lead does not just read those tickets and say "this is category X."
+They also decide:
 
-## The Repo In One Sentence
+- how urgent it is
+- which team should own it
+- what the next action should be
+- whether to gather more information first
+- whether this is big enough to open an incident
+- whether to delay one ticket because a more important cluster is coming
 
-This environment simulates a short helpdesk queue where an agent routes one ticket at a time and is graded on structured routing quality.
+That is why this project is stronger than a simple text classifier. It tries to model a small operational workflow, not just a label lookup.
 
-## Judge-Facing Explanation
-
-If a judge asks why this environment is strong, the concise answer is:
+## What OpenEnv Means In Plain English
 
-1. IT helpdesk routing is a real operational workflow with clear business value.
-2. The input is realistic free-form ticket text, but the output is typed and easy to grade deterministically.
-3. The three-task ladder creates a clean progression from basic classification to full queue routing.
-4. The repo stays judge-friendly because the vocabulary, task labels, and scoring rules are explicit and frozen.
+OpenEnv is a way of turning a real task into an environment that an agent can interact with step by step.
 
-## Frozen Project Identity
+Instead of asking a model one question and scoring one answer, we create a loop:
 
-- Team name: `Hackstreet Boys`
-- Members: `Roopal Guha Neogi`, `Suyash Kumar`
-- Domain: `IT Helpdesk Ticket Routing`
-- OpenEnv name: `it_helpdesk_ticket_routing_openenv`
-- App environment name: `it_helpdesk_ticket_routing`
+1. the environment shows the agent the current situation
+2. the agent chooses an action
+3. the environment changes state
+4. the agent sees the new situation
+5. this continues until the episode ends
 
-## Practical Mental Model
+That matters because many real jobs are not one-shot question answering. They involve:
 
-```text
-inference.py
-    |
-    v
-client.py  <---->  server/app.py
-                         |
-                         v
-                server/environment.py
-                  |       |        |
-                  v       v        v
-            grader.py  reward.py  tasks.py
-                                  |
-                                  v
-                           data/dataset.json
-```
+- incomplete information
+- intermediate choices
+- trade-offs
+- consequences that show up later
 
-The repo is a small OpenEnv stack:
+Helpdesk work fits this pattern well.
 
-- `inference.py` drives episodes
-- `client.py` talks to the app
-- `server/environment.py` manages queue state and episode flow
-- `server/grader.py` scores actions
-- `server/reward.py` computes step and final reward behavior
-- `server/tasks.py` defines the task ladder and loads the dataset
-- `data/dataset.json` stores the labeled helpdesk tickets
+## The Real-World Problem We Chose
 
-## Frozen Runtime Vocabulary
+The business problem is IT helpdesk ticket routing.
 
-### Fields
+In a real company, support work usually has four important decisions:
 
-- `issue_type`
-- `priority`
-- `assignment_group`
-- `resolution_action`
+1. `issue_type`
+   - What kind of problem is this really?
+   - Example: billing issue, access issue, phishing report, onboarding request.
+2. `priority`
+   - How urgent is it?
+   - Example: low, medium, high, critical.
+3. `assignment_group`
+   - Which team should own it?
+   - Example: service desk, security team, procurement, onboarding ops.
+4. `resolution_action`
+   - What should happen next?
+   - Example: fulfill it directly, assign it, escalate it, acknowledge it, or ignore it.
 
-### Issue types
+These four decisions are the heart of the benchmark.
 
-- `billing_license`
-- `identity_access`
-- `application_support`
-- `service_request`
-- `spam_phishing`
-- `general_inquiry`
-- `security_compliance`
-- `onboarding`
-- `feature_request`
+## Why This Problem Is Good For A Hackathon
 
-### Assignment groups
+This use case is strong because it has the right mix of realism and clarity.
 
-- `license_ops`
-- `service_desk`
-- `application_team`
-- `procurement`
-- `security_team`
-- `onboarding_ops`
+It is realistic:
 
-### Resolution actions
+- companies really do route tickets like this every day
+- mistakes are costly
+- urgency and ownership matter
 
-- `fulfill`
-- `escalate`
-- `assign`
-- `ignore`
-- `acknowledge`
+It is structured:
 
-## Main Models
+- the inputs are messy natural language
+- the outputs are typed and easy to score
 
-### `HelpdeskTicketRecord`
+It is judge-friendly:
 
-Represents the labeled dataset row used for grading.
+- someone can understand the workflow quickly
+- the labels are concrete
 
-Important fields:
+It is agentic:
 
-- `ticket_id`
-- `title`
-- `requester`
-- `description`
-- `issue_type`
-- `priority`
-- `assignment_group`
-- `resolution_action`
-- optional `ambiguity_note`
-- optional `related_ticket_id`
+- the agent can investigate
+- the agent can ask for more info
+- the agent can defer
+- the agent can open an incident
+- earlier decisions can affect later tickets
 
-### `HelpdeskTicketAction`
+## The Mental Model: Think Like A Shift Lead
 
-Represents the agent step. `action_type="submit"` carries routing fields, while `action_type="investigate"` uses a small built-in tool surface before the final submission.
+The best way to understand the environment is to imagine you are the helpdesk shift lead for the next 20 minutes.
 
-### `HelpdeskTicketObservation`
+Tickets are arriving in a short queue.
 
-Represents what the agent sees for each step:
+You cannot treat each ticket as if it lives alone.
 
-- task metadata
-- visible ticket fields
-- optional ambiguity or follow-up context
-- queue progress
-- score history
+Sometimes:
 
-### `HelpdeskTicketState`
+- two tickets are part of the same outage
+- one customer keeps opening related follow-ups
+- your security team has limited bandwidth
+- if you ignore a risky ticket now, it will create another ticket later
+- if you open an incident early, later related tickets become easier to manage
 
-Represents the internal episode state used by the environment.
+That is the real heart of the benchmark.
 
-## Episode Flow
+## What The Agent Actually Does
 
-### `reset()`
+The agent interacts with the environment one step at a time.
 
-On reset, the environment:
+For each ticket, it can choose one of several actions.
 
-1. chooses the task definition
-2. samples a queue of 3 to 5 tickets
-3. initializes a new episode id and state
-4. returns the first observation
+### 1. `submit`
 
-### `step(action)`
+This means:
 
-On each step, the environment:
+"I know enough. Here is my routing decision."
 
-1. grades the action against the current ticket
-2. stores the per-ticket score
-3. increments queue progress
-4. returns the next observation or final result
+The agent provides:
 
-### `state()`
+- issue type
+- priority
+- assignment group
+- resolution action
 
-Returns the internal state snapshot for debugging or inspection.
+Real-world example:
 
-## Observation And State At A Glance
+A ticket says, "A new contractor starts Monday and needs access to the standard onboarding apps."
 
-The observation exposes:
+The agent may decide:
 
-- task metadata
-- the current ticket
-- available investigation tools
-- remaining free investigation budget
-- the latest tool result, when one was requested
-- queue progress counters
-- history
-- reward and done status
+- issue type: `onboarding`
+- priority: `medium`
+- assignment group: `onboarding_ops`
+- resolution action: `fulfill`
 
-Useful queue counters now include:
+### 2. `investigate`
 
-- `tickets_remaining`: not-yet-processed tickets, including the current ticket when one is active
-- `tickets_after_current`: how many tickets remain after the current one
-- `queue_position`: 1-based position of the current ticket in the queue
+This means:
 
-The state tracks:
+"I do not want to commit yet. Let me look up one more internal signal."
 
-- current task
-- seed
-- queue ticket IDs
-- current ticket index
-- per-ticket scores
-- total reward
-- investigation step count
+This is similar to a real support lead opening internal notes, checking a related case, or reviewing requester history before making a decision.
 
-## Task Design
+### 3. `request_info`
 
-### Task 1: Issue Type Classification
+This means:
 
-The agent ultimately predicts:
+"The current ticket is missing something important. I want clarification before routing it strongly."
 
-- `issue_type`
+Real-world example:
 
-Purpose:
+A customer writes:
 
-- establish the simplest classification baseline
+"We need help before the board meeting."
 
-### Task 2: Issue Type And Priority
+That is too vague. You may need to know:
 
-The agent ultimately predicts:
+- what system is affected
+- whether it is a live outage
+- whether security is involved
 
-- `issue_type`
-- `priority`
+### 4. `defer`
 
-Purpose:
+This means:
 
-- force the agent to understand both topic and urgency
+"I am intentionally pushing this later in the queue because another item is more urgent or I expect better context soon."
 
-### Task 3: Full Ticket Routing
+This is not the same as ignoring the ticket.
+It is a strategic queue decision.
 
-The agent ultimately predicts:
+Real-world example:
 
-- `issue_type`
-- `priority`
-- `assignment_group`
-- `resolution_action`
+You have one ticket about a pricing clarification and another about a company-wide identity lockout.
+You may defer the pricing question so you can stabilize the outage cluster first.
 
-Purpose:
+### 5. `open_incident`
 
-- evaluate complete operational routing behavior
+This means:
 
-## Grading Mental Model
+"This is bigger than a normal ticket. I need to reserve incident-handling capacity."
 
-The grader is deterministic and intentionally simple to explain.
+Real-world example:
 
-- `issue_type` gets exact or partial credit for selected near-miss pairs
-- `priority` gets exact or proximity credit
-- `assignment_group` gets exact credit
-- `resolution_action` gets exact credit
+If multiple customers are reporting the same outage or privileged-access failure, opening an incident early can prevent chaos later in the queue.
 
-Just as important, the grader is not fuzzy by default:
+## Why The Tools Exist
 
-- exact matches stay dominant
-- wrong issue types outside the declared similarity map score `0.0`
-- wrong priorities outside the declared proximity table score `0.0`
-- assignment group and resolution action never receive partial credit
+The investigation tools are there because real support work is rarely solved from the first sentence alone.
 
-Task weighting:
+The environment includes tools such as:
 
-- Task 1: only `issue_type`
-- Task 2: `issue_type` 60%, `priority` 40%
-- Task 3: `issue_type` 35%, `priority` 20%, `assignment_group` 25%, `resolution_action` 20%
+- related ticket lookup
+- requester history lookup
+- internal routing note lookup
+- queue capacity forecast
+- queue cluster summary
 
-This is now proven in checked-in unit tests rather than left as a docs claim.
+Think of these as controlled windows into the rest of the system.
 
-## Reward Mental Model
+They matter because some tickets are intentionally incomplete.
 
-Step reward:
+For example:
 
-- current ticket score with a small milestone bonus for strong steps and a small penalty for very weak steps
+- the visible ticket may look like a normal billing issue
+- the internal routing note may reveal it is actually connected to an application outage
+- the queue cluster summary may reveal there are two more related tickets behind it
+- the capacity forecast may reveal the preferred team is overloaded, so a fallback route becomes reasonable
 
-Final reward:
+This is how the project creates decision-making instead of simple label prediction.
 
-- average of ticket scores
-- minus a tiny penalty only if the agent exceeds the free investigation budget for the queue
+## Why Earlier Decisions Affect Later Tickets
 
-This keeps the reward dense and deterministic, removes the dead overshoot logic, and adds a small queue-level economics signal without disturbing the no-tool baseline path.
+This is one of the most important ideas in the whole project.
 
-## Dataset Mental Model
+If your benchmark has no carry-over state, it is often just classification repeated several times.
 
-The dataset is small enough to audit manually but varied enough to support a meaningful benchmark.
+This project tries to avoid that by making the queue matter.
 
-Current structure:
+Examples:
 
-- 45 tickets
+- if you handle an outage ticket well, later tickets from the same cluster become easier to route
+- if you handle it poorly, later tickets can become more urgent or more confused
+- if you open an incident, related tickets may already have incident coverage
+- if you defer too many things, SLA pressure grows
+- if you burn the wrong team's capacity early, later tickets may need fallback routing
+
+In simple terms:
+
+the world changes because of what the agent did earlier.
+
+That is what makes the benchmark feel more like operations and less like a quiz.
+
+## The Three Tasks And Why They Exist
+
+All three tasks now use full routing. That is an important design choice.
+
+We are not making one task "just classify the issue type" anymore. We keep the core job the same and change how hard the world is.
+
+### Task 1: Guided Full Routing
+
+This is the easiest version.
+
+The ticket is mostly visible.
+The agent still performs full routing, but the world is simpler and more single-ticket.
+
+This task teaches:
+
+"Can you route a normal helpdesk ticket correctly?"
+
+### Task 2: Contextual Full Routing
+
+This is the medium version.
+
+Now some useful context is hidden unless the agent investigates or asks for more information.
+There is also moderate queue carry-over.
+
+This task teaches:
+
+"Can you route well when the ticket alone is not enough?"
+
+### Task 3: Adaptive Queue Routing
+
+This is the hard version.
+
+Now the agent must handle:
+
+- hidden decisive context
+- queue capacity pressure
+- incidents
+- clustered requests
+- deferrals
+- follow-up tickets created by weak earlier handling
+
+This task teaches:
+
+"Can you manage the queue like an operator, not just label a ticket?"
+
+## What The Dataset Must Do
+
+The dataset is not just a list of random support messages.
+
+It must teach the benchmark what "good routing" looks like.
+
+A useful dataset for this project needs:
+
 - clear easy examples
-- medium cases where urgency matters
-- harder ambiguous cases
-- follow-up tickets connected through `related_ticket_id`
+- medium examples where urgency matters
+- ambiguous examples where the wording can mislead a naive policy
+- related tickets that belong to the same cluster
+- tickets where fallback routing can still be acceptable
+- tickets where weak handling should logically create follow-up work
 
-When a follow-up link exists, the observation can now surface a lightweight `related_ticket_preview`, and the tool layer can fetch richer related-ticket or requester-history context so the agent does not have to route every ticket from isolated text alone.
+Real-world example:
 
-The dataset is meant to test routing judgment, not just keyword spotting.
+If a ticket says:
 
-## Grounding Note
+"The seat increase is blocked and finance is also confused about prorating"
 
-The taxonomy and limited partial-credit policy were reviewed against public IT-support references recorded in `analysis/grounding_audit.md`.
+that is not a perfectly clean one-label case.
+It could pull toward procurement, license operations, or service desk depending on queue pressure and business context.
 
-The grounding inputs used for that review were:
+Those are the kinds of examples that make the environment interesting.
 
-- `Classification of IT Support Tickets`
-- `Semantic Similarity of IT Support Tickets`
-- `MSDialog`
+## How Scoring Works Conceptually
 
-The key conclusion was to keep the similarity map narrow. The current issue-type near misses are defensible, but broader additions would blur operationally distinct routing actions too much this late in the submission cycle.
+The grader should feel like a tough but fair manager.
 
-## Inference Script In Simple Terms
+It should not be vague.
 
-`inference.py` is the baseline agent runner.
+It should not say:
 
-It:
+"Anything somewhat close gets points."
 
-1. connects to the environment
-2. loads the available tasks
-3. runs one episode for the requested task
-4. picks an action for each ticket
-5. sends the action back through the client
-6. records rewards
-7. prints structured logs for that run
+Instead, it should say:
 
-It supports:
+- exact answers get the most credit
+- a few near misses can receive partial credit
+- fallback routes only count when they were explicitly designed to count
+- clearly wrong answers get low or zero credit
 
-- heuristic mode with no external model
-- LLM mode through an OpenAI-compatible API
-- lightweight investigation-tool calls before the final submit action
-- an explicit local `RUN_ALL_TASKS=1` override when you want the old multi-task sweep
+That is why the grader is deterministic and narrow.
 
-## Files That Matter Most
+This matters for two reasons:
 
-- `vocabulary.py`: locked constants and default routing maps
-- `models.py`: typed schema and validation
-- `server/environment.py`: episode engine
-- `server/tasks.py`: task ladder and dataset loader
-- `server/grader.py`: deterministic scoring
-- `server/reward.py`: reward helpers
-- `server/app.py`: OpenEnv app entry point
-- `client.py`: typed multi-step client
-- `openenv.yaml`: environment metadata
-- `server/Dockerfile`: container entry point
+1. judges can trust the benchmark
+2. an agent actually gets a meaningful learning signal
 
-## Validation Notes
+## Why Reward Is Not Exactly The Same As Grading
 
-The repo has already gone through two useful validation phases.
+This is a subtle but important idea.
 
-### April 2 consistency pass
+The final rubric score tells us how good the overall episode was.
 
-This was the documentation and packaging alignment pass.
+The step reward helps the agent learn during the episode.
 
-What needed to agree:
+You can think of it like coaching during a football match:
 
-- docs say ticket routing, not email processing
-- docs use the same vocabulary as the code
-- `openenv.yaml`, `pyproject.toml`, and `requirements.txt` describe the same runtime surface
-- Docker startup matches the documented server entry point
-- local setup instructions match the current repo layout
+- the final match result is the real outcome
+- the coach's feedback during the game helps the team adjust sooner
 
-### April 3 and April 4 runtime-feedback pass
+In this project:
 
-The first local runtime pass surfaced one practical issue:
+- terminal reward reflects overall routing plus queue-management quality
+- step rewards make the environment less sparse
+- unnecessary investigation or poor operational choices can carry penalties
 
-- `data/dataset.json` was saved with a UTF-8 BOM, which caused `json.load()` to fail during environment creation on Windows
+So the final score is the verdict, while the step reward is the training signal.
 
-That issue is now handled in `server/tasks.py` by loading the dataset with `utf-8-sig`.
+## The Difference Between "Correct Ticket Routing" And "Good Queue Management"
 
-The local heuristic baseline completed successfully after that fix with:
+This difference separates average benchmarks from stronger ones.
 
-- Task 1: `1.0000`
-- Task 2: `0.8800`
-- Task 3: `0.9400`
-- Overall: `0.9400`
+A ticket can be locally correct but globally poor.
 
-A merged-state rerun on the current `main` branch matched those same numbers exactly.
+Example:
 
-### April 6 repo audit
+- yes, security might be the best owner for a certain ticket
+- but if the security queue is already overloaded and the task explicitly allows a fallback operational route, a smart agent may choose the alternate route
 
-An April 6 audit confirmed:
+That is why this project now includes:
 
-- all required runtime, data, metadata, and documentation files are present
-- the docs consistently describe IT helpdesk ticket routing rather than the old email-triage domain
-- the current local benchmark reference is still `1.0000`, `0.8800`, `0.9400`, overall `0.9400`
-- the remaining work is execution validation, not documentation cleanup
+- alternate acceptable routes on selected tickets
+- capacity-aware routing
+- queue-management score
+- cluster stabilization and destabilization
 
-### April 6 and April 7 Roopal-side doc pass
+A good benchmark should reward not just being correct in isolation, but being operationally sensible.
 
-That follow-up pass added the remaining Roopal-owned public-clarity items:
+## How To Explain The Main Files To A Beginner
 
-- Hugging Face Spaces README frontmatter
-- explicit judge-facing explanation that scoring is deterministic and only partially fuzzy in declared places
-- an internal grounding note tying the label space to public IT-support datasets
-- a refreshed compliance snapshot in `required.md`
+If you are teaching this project to someone new, use these analogies.
 
-The optional TRL / GRPO README example remains intentionally deferred because it is optional and lower priority than freeze-phase stability.
+### `server/tasks.py`
 
-## April 3-7 Status
+This is the curriculum.
 
-The roadmap through April 7 is now closed in the current repo state.
+It says:
 
-That means the repo now has:
+- what the tasks are
+- how hard they are
+- what kinds of tickets exist
 
-1. checked-in unit, smoke, and integration tests
-2. Docker smoke coverage through the GitHub Actions workflow
-3. a clean-copy install-and-run pass
-4. structured `inference.py` logging verification
-5. a passing local `openenv validate` result after checking in `uv.lock`
+### `data/dataset.json`
 
-## Submission-Day Reminders
+This is the casebook.
 
-The remaining work belongs to the April 8 submission window rather than the April 3 to April 7 implementation window:
+It is the collection of real-looking helpdesk scenarios that power the environment.
 
-1. rerun the final sanity slice on the submission branch
-2. verify the live Hugging Face Space ping and reset path after the final push if a fresh deployment is created
+### `server/environment.py`
 
-## One-Minute Summary
+This is the game master.
 
-If you come back to this repo later, remember:
+It keeps track of:
 
-- the domain is IT helpdesk ticket routing
-- the environment is a short queue, not a single-shot classifier
-- the architecture is a compact OpenEnv stack
-- one ticket is shown at a time
-- the agent predicts structured routing fields
-- the grader gives deterministic partial credit
-- `inference.py` is the baseline agent runner
-- merged-state validation, Docker smoke coverage, clean-copy rerun, and local validator readiness are all now in place
+- which ticket is current
+- what the queue looks like
+- what happened earlier
+- what the next observation should be
+
+### `server/grader.py`
+
+This is the scorekeeper.
+
+It decides how good a routing answer was.
+
+### `server/reward.py`
+
+This is the coach.
+
+It turns raw outcomes into feedback signals the agent can learn from.
+
+### `inference.py`
+
+This is the example player.
+
+It shows how an agent can interact with the environment.
+
+### `server/app.py`
+
+This is the front desk.
+
+It exposes the environment through web endpoints so tools and evaluators can use it.
+
+## How I Would Teach A Beginner To Build This Project From Scratch
+
+If you were starting from zero, I would teach the build order like this.
+
+### Step 1: Choose A Real Workflow
+
+Do not start with code.
+Start with the business process.
+
+Ask:
+
+- who is the user?
+- what decision are they making?
+- what makes that decision hard?
+- what happens if they get it wrong?
+
+For us, the answers were:
+
+- the user is a helpdesk routing agent
+- the decisions are issue type, priority, owner, and next action
+- the hard parts are ambiguity, queue pressure, and incomplete information
+- mistakes cause delays, wrong ownership, and follow-up work
+
+### Step 2: Freeze The Vocabulary
+
+Before coding, decide the labels clearly.
+
+If the team keeps changing label names midway, everything becomes unstable:
+
+- dataset
+- grader
+- prompts
+- docs
+- tests
+
+This is why a frozen vocabulary is so important.
+
+### Step 3: Build Realistic Example Cases
+
+Write tickets the way real people write them:
+
+- incomplete
+- emotional
+- slightly messy
+- not perfectly labeled in the text
+
+If every ticket literally contains the answer, the benchmark becomes a keyword game.
+
+### Step 4: Decide What The Agent Sees Immediately
+
+Not everything should be visible at once.
+
+Ask:
+
+- what would a real support analyst know right away?
+- what would require investigation?
+- what would require asking someone?
+
+That decision creates the need for tools and intermediate actions.
+
+### Step 5: Add Actions Beyond Final Submission
+
+If the only action is "submit the answer," you are probably building classification.
+
+To make it feel operational, add actions that shape the path:
+
+- investigate
+- ask for clarification
+- defer
+- escalate or open incident
+
+These are realistic and easy to explain.
+
+### Step 6: Make State Carry Over
+
+This is where many projects stay shallow.
+
+You need earlier choices to matter later.
+
+For example:
+
+- capacity should be reduced after use
+- related tickets should react to earlier handling
+- follow-up tickets should appear when earlier work was weak
+
+Without this, you do not really have a sequential benchmark.
+
+### Step 7: Design Deterministic Grading
+
+The grader should be explainable to a judge in under a minute.
+
+That usually means:
+
+- exact match for most things
+- a small number of explicit partial-credit rules
+- no secret fuzzy logic
+
+### Step 8: Add Reward Shaping Carefully
+
+Reward shaping should help learning, not distort the benchmark.
+
+Good shaping:
+
+- rewards useful investigation
+- discourages wasteful probing
+- gently rewards good operational flow
+
+Bad shaping:
+
+- makes a silly exploit better than actually solving the task
+
+### Step 9: Build A Baseline Agent
+
+Always include a runner that can play the environment.
+
+It does not need to be perfect.
+It just needs to prove the environment works and give judges something concrete to run.
+
+### Step 10: Make It Easy To Validate And Deploy
+
+A good benchmark is not just interesting. It is runnable.
+
+That means:
+
+- clean metadata
+- clear docs
+- Docker support
+- validation passing
+- a landing page that makes sense to a judge
+
+## Common Beginner Mistakes To Avoid
+
+### Mistake 1: Building A Fancy Classifier And Calling It An Environment
+
+If nothing carries over between steps, you probably do not have a true environment yet.
+
+### Mistake 2: Making The Grader Too Fuzzy
+
+If almost every answer gets partial credit, your score stops being trustworthy.
+
+### Mistake 3: Making The Hard Task Easy For Heuristics
+
+If a simple keyword rule gets near-perfect scores, the benchmark will not feel meaningful.
+
+### Mistake 4: Adding Random Complexity Instead Of Business Logic
+
+Harder is not always better.
+Complexity should come from realistic workflow pressure, not arbitrary tricks.
+
+### Mistake 5: Writing Docs Only For Teammates
+
+Hackathon judges are outsiders.
+Your docs must help a smart new reader understand the project quickly.
+
+## How To Talk About This Project In A Demo
+
+If you need to explain the project fast, say this:
+
+"We built an OpenEnv benchmark for IT helpdesk routing. The agent does not just classify tickets. It manages a short operational queue, can investigate hidden context, request clarification, defer work, open incidents, and make routing choices whose consequences affect later tickets. The scoring is deterministic, but the environment still has real trade-offs because queue pressure and related-ticket clusters change what good handling looks like."
+
+That is the shortest honest pitch.
+
+## What Makes This Project Strong Today
+
+The current version is strongest in these areas:
+
+- clear real-world workflow
+- structured, judge-friendly outputs
+- deterministic grading
+- multi-step operational actions
+- queue-level consequences
+- cluster-aware carry-over state
+- clean packaging and validation story
+
+## What Would Make It Even Stronger Later
+
+If this project kept growing after the hackathon, the next upgrades would be:
+
+- make more of the consequences emerge from a general simulator instead of authored rules
+- increase the data diversity further
+- train stronger learned policies instead of relying mainly on deterministic policy search
+- add more business objectives like cost, customer satisfaction, and resolver fatigue
+
+## One-Minute Recap
+
+If you forget everything else, remember this:
+
+- this project simulates helpdesk queue management, not just ticket classification
+- the agent must choose both what the ticket means and what to do next
+- some useful context is hidden and must be uncovered through actions
+- earlier choices affect later tickets
+- the grader is deterministic so the benchmark stays trustworthy
+- the project is built to be understandable, runnable, and useful as an OpenEnv environment

@@ -294,7 +294,7 @@ The grader is intentionally narrow and declared, not fully fuzzy.
 
 That scoring policy is now backed by checked-in unit tests in `tests/test_grader_unit.py` and `tests/test_tasks_unit.py`.
 
-The label set and partial-credit choices were also reviewed against public IT-support references captured in `analysis/grounding_audit.md`, including:
+The label set and partial-credit choices were also reviewed against public IT-support references during development, including:
 
 - `Classification of IT Support Tickets`
 - `Semantic Similarity of IT Support Tickets`
@@ -367,7 +367,7 @@ requirements.txt
 README.md
 KNOWLEDGE.md
 required.md
-ROADMAP.md
+PROJECT_STATUS.md
 ```
 
 ## Core Files
@@ -469,7 +469,7 @@ Current local smoke expectations:
 - rewards remain in range for every task
 - the hard task now depends much more heavily on investigation behavior, so exact seed-level baseline numbers are no longer treated as the benchmark reference for the repo
 
-The April 6 to April 7 validation pass then closed the remaining roadmap gates with Docker smoke coverage via GitHub Actions, a clean-copy install-and-run rerun, structured inference-log verification, and a passing local `openenv validate` check after checking in `uv.lock`.
+The April 6 to April 7 validation pass then closed the remaining validation gates with Docker smoke coverage via GitHub Actions, a clean-copy install-and-run rerun, structured inference-log verification, and a passing local `openenv validate` check after checking in `uv.lock`.
 
 ### Windows note
 
@@ -530,7 +530,7 @@ An April 6 repo audit also confirmed that all required submission files are pres
 
 - runtime: `models.py`, `client.py`, `inference.py`, `server/app.py`, `server/environment.py`, `server/grader.py`, `server/reward.py`, `server/tasks.py`
 - data and metadata: `data/dataset.json`, `openenv.yaml`, `pyproject.toml`, `requirements.txt`, `server/Dockerfile`
-- docs and planning: `README.md`, `KNOWLEDGE.md`, `required.md`, `PROJECT_STATUS.md`, `ROADMAP.md`
+- docs and project guidance: `README.md`, `KNOWLEDGE.md`, `required.md`, `PROJECT_STATUS.md`
 
 Roadmap status through April 7 is complete:
 
@@ -545,4 +545,4 @@ The remaining April 8 work is operational rather than implementation-heavy:
 - run the final submission-branch sanity slice before pushing
 - perform the live Hugging Face Space ping and reset check on the deployed submission artifact if a fresh deployment is created
 
-The short TRL / GRPO README example from the roadmap remains intentionally deferred because it is optional and lower priority than freeze-phase stability.
+The short TRL / GRPO README example remains intentionally deferred because it is optional and lower priority than benchmark clarity and stability.

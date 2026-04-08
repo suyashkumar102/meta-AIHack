@@ -354,7 +354,7 @@ The project is ready when:
 
 ## Current Compliance Snapshot
 
-As of April 7, 2026, the roadmap gates through the end of the freeze window are in place:
+As of April 8, 2026, the core submission requirements and the major benchmark upgrades are in place:
 
 - real-world task definition is clear and stable
 - typed models, `reset()`, `step()`, `state()`, and `openenv.yaml` are present in the repo
@@ -365,16 +365,17 @@ As of April 7, 2026, the roadmap gates through the end of the freeze window are 
 - integration tests now cover `/health`, `/tasks`, `/reset`, `/step`, `/state`, full seeded episodes, and heuristic regression
 - baseline heuristic results are recorded in the docs
 - the README now includes Hugging Face Spaces frontmatter and a judge-facing grounded-scoring explanation
-- an internal grounding audit exists in `analysis/grounding_audit.md`
+- the label space and partial-credit policy were reviewed against public IT-support references during development
 - `.openenvignore` is present
 - Docker smoke coverage exists through the checked-in GitHub Actions workflow and recorded April 6 run
 - `inference.py` structured `[START]`, `[STEP]`, and `[END]` logging is verified
 - `uv.lock` is checked in and `openenv validate` now passes on the current repo state
 - a clean-copy install-and-run pass has been completed
 
-The remaining April 8 work is operational rather than implementation-heavy:
+The remaining work is optional benchmark expansion rather than submission readiness work:
 
-- Hugging Face deployment ping and reset verification
-- the final submission-branch sanity rerun before push if any last-minute packaging-only change lands
+- make the simulator even more emergent instead of partially authored
+- broaden the data distribution further
+- replace the local policy search loop with a more training-oriented learning setup if needed later
 
-The roadmap's short TRL / GRPO README example remains optional and is still deferred because it is not required for submission readiness.
+The short TRL / GRPO README example remains optional and is still deferred because it is not required for this project to be understandable, runnable, or judgeable.
